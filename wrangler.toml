@@ -1,0 +1,7 @@
+name = "lexi-vk"
+type = "javascript"
+account_id = ""
+workers_dev = true
+
+[env.production]
+account_id = ""
