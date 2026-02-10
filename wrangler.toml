@@ -1,4 +1,4 @@
-name = "lexi-vk"
+name = "lexivk"
 type = "javascript"
 account_id = ""
 workers_dev = true
