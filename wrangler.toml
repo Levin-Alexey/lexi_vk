@@ -1,7 +1,5 @@
-name = "lexi-vk"
-type = "javascript"
+name = "lexivk"
 main = "index.js"
+type = "service"
 compatibility_date = "2026-02-10"
-account_id = ""
-workers_dev = true
-preview_urls = false
+
