@@ -4,3 +4,4 @@ main = "index.js"
 compatibility_date = "2026-02-10"
 account_id = ""
 workers_dev = true
+preview_urls = false
