@@ -3,3 +3,11 @@ main = "index.js"
 type = "service"
 compatibility_date = "2026-02-10"
 
+[[kv_namespaces]]
+binding = "KV"
+id = "9180f73744b349bd86fe9810fc61001f"
+
+[[d1_databases]]
+binding = "DB"
+database_id = "848ff033-2d6c-4b3d-9727-1941c73d3295"
+
