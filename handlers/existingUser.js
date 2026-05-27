@@ -1,6 +1,6 @@
 import { sendVkMessage } from '../services/vkApi.js';
 
-const RETURNING_USER_PHOTO_ATTACHMENT = 'photo175946972_457239738_b26e0a395b08e597ed';
+const RETURNING_USER_PHOTO_ATTACHMENT = 'photo175946972_457239739_27eedd46884c68f160';
 
 export async function handleExistingUser({ userId, groupId, token }) {
   return sendVkMessage({

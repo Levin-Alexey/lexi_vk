@@ -1,28 +1,90 @@
-export async function sendVkMessage({ userId, groupId, token, message, keyboard, attachment }) {
-  const url = new URL('https://api.vk.com/method/messages.send');
+const VK_API_VERSION = '5.199';
 
-  url.searchParams.append('user_id', String(userId));
-  url.searchParams.append('group_id', String(groupId));
-  url.searchParams.append('message', message);
-  url.searchParams.append('random_id', String(Date.now()));
+async function callVkMethod(method, token, params) {
+  const url = new URL(`https://api.vk.com/method/${method}`);
   url.searchParams.append('access_token', token);
-  url.searchParams.append('v', '5.199');
+  url.searchParams.append('v', VK_API_VERSION);
 
-  if (keyboard) {
-    url.searchParams.append('keyboard', JSON.stringify(keyboard));
-  }
+  for (const [key, value] of Object.entries(params || {})) {
+    if (value === undefined || value === null) {
+      continue;
+    }
 
-  if (attachment) {
-    url.searchParams.append('attachment', attachment);
+    if (typeof value === 'object') {
+      url.searchParams.append(key, JSON.stringify(value));
+    } else {
+      url.searchParams.append(key, String(value));
+    }
   }
 
   const response = await fetch(url.toString());
   const data = await response.json();
 
   if (data.error) {
-    console.error('[VK_ERROR]', data.error.error_msg || JSON.stringify(data.error));
+    console.error('[VK_ERROR]', method, data.error.error_msg || JSON.stringify(data.error));
     return { ok: false, error: data.error };
   }
 
-  return { ok: true, messageId: data.response };
+  return { ok: true, response: data.response };
+}
+
+export async function sendVkMessage({ userId, groupId, token, message, keyboard, attachment }) {
+  const result = await callVkMethod('messages.send', token, {
+    user_id: userId,
+    group_id: groupId,
+    message,
+    keyboard,
+    attachment,
+    random_id: Date.now(),
+  });
+
+  if (!result.ok) {
+    return result;
+  }
+
+  return { ok: true, messageId: result.response };
+}
+
+export async function editVkMessage({ token, peerId, conversationMessageId, message, keyboard, attachment }) {
+  const result = await callVkMethod('messages.edit', token, {
+    peer_id: peerId,
+    conversation_message_id: conversationMessageId,
+    message,
+    keyboard,
+    attachment,
+    keep_forward_messages: 1,
+    keep_snippets: 1,
+  });
+
+  if (!result.ok) {
+    return result;
+  }
+
+  return { ok: true, edited: Boolean(result.response) };
+}
+
+export async function answerVkMessageEvent({ token, eventId, userId, peerId, text }) {
+  if (!eventId || !userId || !peerId) {
+    return { ok: true, skipped: true };
+  }
+
+  const eventData = text
+    ? {
+        type: 'show_snackbar',
+        text,
+      }
+    : undefined;
+
+  const result = await callVkMethod('messages.sendMessageEventAnswer', token, {
+    event_id: eventId,
+    user_id: userId,
+    peer_id: peerId,
+    event_data: eventData,
+  });
+
+  if (!result.ok) {
+    return result;
+  }
+
+  return { ok: true };
 }

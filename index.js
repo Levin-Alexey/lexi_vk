@@ -1,6 +1,6 @@
-import { handleStartOnboarding } from './handlers/startOnboarding.js';
+import { handleOnboardingAction, handleStartOnboarding, isOnboardingCommand, onboardingPayload } from './handlers/startOnboarding.js';
 import { handleExistingUser } from './handlers/existingUser.js';
-import { sendVkMessage } from './services/vkApi.js';
+import { answerVkMessageEvent, sendVkMessage } from './services/vkApi.js';
 
 const CONFIRMATION_CODE = '02c2fafa';
 const WELCOME_VIDEO_ATTACHMENT = 'video-230370533_456239021';
@@ -11,9 +11,9 @@ const firstVisitKeyboard = {
     [
       {
         action: {
-          type: 'text',
+          type: 'callback',
           label: 'Начнем?🥳',
-          payload: JSON.stringify({ command: 'start_onboarding' }),
+          payload: onboardingPayload('os'),
         },
         color: 'primary',
       },
@@ -52,6 +52,63 @@ export default {
       });
     }
 
+    if (payload.type === 'message_event') {
+      const eventObject = payload?.object;
+      const eventPayload = parseMessagePayload(eventObject?.payload);
+      const userId = Number(eventObject?.user_id);
+      const groupId = payload.group_id;
+
+      if (!userId || !eventPayload) {
+        return okResponse();
+      }
+
+      if (!env.VK_TOKEN) {
+        console.error('[ERROR] VK_TOKEN не задан в секретах окружения');
+        return okResponse();
+      }
+
+      await ensureUsersTable(env.DB);
+
+      const eventContext = {
+        peerId: Number(eventObject?.peer_id),
+        conversationMessageId: Number(eventObject?.conversation_message_id),
+        eventId: eventObject?.event_id,
+        eventUserId: userId,
+      };
+
+      if (eventPayload?.v === 1 && eventPayload?.c === 'os') {
+        // Старт опроса отдельным сообщением, чтобы не затирать приветственный экран.
+        await handleStartOnboarding({ userId, groupId, token: env.VK_TOKEN, env });
+        await answerVkMessageEvent({
+          token: env.VK_TOKEN,
+          eventId: eventContext.eventId,
+          userId,
+          peerId: eventContext.peerId,
+          text: 'Опрос начат',
+        });
+        return okResponse();
+      }
+
+      if (isOnboardingCommand(eventPayload)) {
+        await handleOnboardingAction({
+          userId,
+          groupId,
+          token: env.VK_TOKEN,
+          env,
+          command: eventPayload.c,
+          payload: {
+            ...eventPayload,
+            peerId: eventContext.peerId,
+            conversationMessageId: eventContext.conversationMessageId,
+            eventId: eventContext.eventId,
+            eventUserId: eventContext.eventUserId,
+          },
+        });
+      }
+
+      return okResponse();
+    }
+
     if (payload.type === 'message_new') {
       const message = payload?.object?.message;
       if (!message || !message.from_id) {
@@ -80,8 +137,22 @@ export default {
         await createUser(env.DB, userId);
       }
 
+      const onboardingCommand = parsedPayload?.c;
+
       if (isStartOnboarding(text, parsedPayload)) {
-        await handleStartOnboarding({ userId, groupId, token: env.VK_TOKEN });
+        await handleStartOnboarding({ userId, groupId, token: env.VK_TOKEN, env });
+        return okResponse();
+      }
+
+      if (isOnboardingCommand(parsedPayload)) {
+        await handleOnboardingAction({
+          userId,
+          groupId,
+          token: env.VK_TOKEN,
+          env,
+          command: onboardingCommand,
+          payload: parsedPayload,
+        });
         return okResponse();
       }
 
@@ -123,7 +194,7 @@ function parseMessagePayload(rawPayload) {
 
 function isStartOnboarding(text, payload) {
   const normalizedText = (text || '').trim().toLowerCase();
-  return payload?.command === 'start_onboarding' || normalizedText === 'начнем' || normalizedText === 'начнём';
+  return (payload?.v === 1 && payload?.c === 'os') || normalizedText === 'начнем' || normalizedText === 'начнём';
 }
 
 async function ensureUsersTable(db) {
