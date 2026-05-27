@@ -11,3 +11,12 @@ id = "9180f73744b349bd86fe9810fc61001f"
 binding = "DB"
 database_id = "848ff033-2d6c-4b3d-9727-1941c73d3295"
 
+[[queues.producers]]
+binding = "VOICE_TASKS"
+queue = "voice-tasks"
+
+[[queues.consumers]]
+queue = "voice-tasks"
+max_batch_size = 10
+dead_letter_queue = "my-queue-dlq"
+

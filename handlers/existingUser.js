@@ -1,6 +1,23 @@
 import { sendVkMessage } from '../services/vkApi.js';
+import { lexiChatPayload } from './lexiChat.js';
 
 const RETURNING_USER_PHOTO_ATTACHMENT = 'photo175946972_457239739_27eedd46884c68f160';
+
+const returningUserKeyboard = {
+  inline: true,
+  buttons: [
+    [
+      {
+        action: {
+          type: 'callback',
+          label: 'Общение с Lexi',
+          payload: lexiChatPayload(),
+        },
+        color: 'primary',
+      },
+    ],
+  ],
+};
 
 export async function handleExistingUser({ userId, groupId, token }) {
   return sendVkMessage({
@@ -8,6 +25,12 @@ export async function handleExistingUser({ userId, groupId, token }) {
     groupId,
     token,
     attachment: RETURNING_USER_PHOTO_ATTACHMENT,
-    message: 'Тут будет описание',
+    message: [
+      'Рада видеть Вас снова! 😍',
+      'Я уже подготовила для Вас несколько способов потренировать английский - выбирайте любой путь, а я подстроюсь под Ваш темп и настроение.',
+      '',
+      'Сегодня точно сделаем Ваш английский чуть увереннее. 🍀🤩🎉',
+    ].join('\n'),
+    keyboard: returningUserKeyboard,
   });
 }

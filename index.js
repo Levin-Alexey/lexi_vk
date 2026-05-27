@@ -1,5 +1,8 @@
 import { handleOnboardingAction, handleStartOnboarding, isOnboardingCommand, onboardingPayload } from './handlers/startOnboarding.js';
 import { handleExistingUser } from './handlers/existingUser.js';
+import { handleLexiChat, handleLexiMainMenu, isLexiChatCommand, isLexiMainMenuCommand } from './handlers/lexiChat.js';
+import { handleLexiVoice, isLexiVoiceCommand } from './handlers/chat/lexiVoice.js';
+import { handleLexiText, isLexiTextCommand } from './handlers/chat/lexiText.js';
 import { answerVkMessageEvent, sendVkMessage } from './services/vkApi.js';
 
 const CONFIRMATION_CODE = '02c2fafa';
@@ -89,6 +92,30 @@ export default {
         return okResponse();
       }
 
+      if (isLexiChatCommand(eventPayload)) {
+        await handleLexiChat({ userId, groupId, token: env.VK_TOKEN });
+        await answerVkMessageEvent({ token: env.VK_TOKEN, eventId: eventContext.eventId, userId, peerId: eventContext.peerId });
+        return okResponse();
+      }
+
+      if (isLexiVoiceCommand(eventPayload)) {
+        await handleLexiVoice({ userId, groupId, token: env.VK_TOKEN });
+        await answerVkMessageEvent({ token: env.VK_TOKEN, eventId: eventContext.eventId, userId, peerId: eventContext.peerId });
+        return okResponse();
+      }
+
+      if (isLexiTextCommand(eventPayload)) {
+        await handleLexiText({ userId, groupId, token: env.VK_TOKEN });
+        await answerVkMessageEvent({ token: env.VK_TOKEN, eventId: eventContext.eventId, userId, peerId: eventContext.peerId });
+        return okResponse();
+      }
+
+      if (isLexiMainMenuCommand(eventPayload)) {
+        await handleLexiMainMenu({ userId, groupId, token: env.VK_TOKEN });
+        await answerVkMessageEvent({ token: env.VK_TOKEN, eventId: eventContext.eventId, userId, peerId: eventContext.peerId });
+        return okResponse();
+      }
+
       if (isOnboardingCommand(eventPayload)) {
         await handleOnboardingAction({
           userId,
@@ -153,6 +180,26 @@ export default {
           command: onboardingCommand,
           payload: parsedPayload,
         });
+        return okResponse();
+      }
+
+      if (isLexiChatCommand(parsedPayload)) {
+        await handleLexiChat({ userId, groupId, token: env.VK_TOKEN });
+        return okResponse();
+      }
+
+      if (isLexiVoiceCommand(parsedPayload)) {
+        await handleLexiVoice({ userId, groupId, token: env.VK_TOKEN });
+        return okResponse();
+      }
+
+      if (isLexiTextCommand(parsedPayload)) {
+        await handleLexiText({ userId, groupId, token: env.VK_TOKEN });
+        return okResponse();
+      }
+
+      if (isLexiMainMenuCommand(parsedPayload)) {
+        await handleLexiMainMenu({ userId, groupId, token: env.VK_TOKEN });
         return okResponse();
       }
 
