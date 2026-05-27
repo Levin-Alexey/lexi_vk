@@ -1,8 +1,9 @@
 import { handleStartOnboarding } from './handlers/startOnboarding.js';
+import { handleExistingUser } from './handlers/existingUser.js';
 import { sendVkMessage } from './services/vkApi.js';
 
 const CONFIRMATION_CODE = '02c2fafa';
-const WELCOME_VIDEO_ATTACHMENT = 'video-230370533_456239020';
+const WELCOME_VIDEO_ATTACHMENT = 'video-230370533_456239021';
 
 const firstVisitKeyboard = {
   inline: true,
@@ -11,23 +12,7 @@ const firstVisitKeyboard = {
       {
         action: {
           type: 'text',
-          label: 'Начнем?',
-          payload: JSON.stringify({ command: 'start_onboarding' }),
-        },
-        color: 'primary',
-      },
-    ],
-  ],
-};
-
-const returningKeyboard = {
-  inline: true,
-  buttons: [
-    [
-      {
-        action: {
-          type: 'text',
-          label: 'Продолжить',
+          label: 'Начнем?🥳',
           payload: JSON.stringify({ command: 'start_onboarding' }),
         },
         color: 'primary',
@@ -106,7 +91,7 @@ export default {
         if (isFirstVisit) {
           await sendFirstVisitMessage(userId, env.VK_TOKEN, groupId);
         } else {
-          await sendReturningUserMessage(userId, env.VK_TOKEN, groupId);
+          await handleExistingUser({ userId, groupId, token: env.VK_TOKEN });
         }
       }
     }
@@ -198,13 +183,12 @@ async function createUser(db, vkId) {
 
 async function sendFirstVisitMessage(userId, token, groupId) {
   const message = [
-    'Добро пожаловать!',
+    '👋Добро пожаловать!',
+    '',
     'Чтобы обучение было действительно полезным, я сначала задам Вам несколько простых вопросов.',
     'Это поможет понять Ваш уровень, цель изучения английского и темы, которые Вы хотите прокачать в первую очередь.',
     '',
-    'Ответьте на 3 коротких блока - и я подберу персональный старт обучения.',
-    '',
-    'Начнем?',
+    'Ответьте на 3 коротких блока - и я подберу персональный старт обучения.❤️',
   ].join('\n');
 
   return sendVkMessage({
@@ -214,16 +198,6 @@ async function sendFirstVisitMessage(userId, token, groupId) {
     message,
     attachment: WELCOME_VIDEO_ATTACHMENT,
     keyboard: firstVisitKeyboard,
-  });
-}
-
-async function sendReturningUserMessage(userId, token, groupId) {
-  return sendVkMessage({
-    userId,
-    groupId,
-    token,
-    message: 'С возвращением! Продолжим персональное обучение английскому.',
-    keyboard: returningKeyboard,
   });
 }
 
