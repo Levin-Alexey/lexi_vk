@@ -1,4 +1,4 @@
-import { answerVkMessageEvent, editVkMessage, sendVkMessage } from './vkApi.js';
+import { answerVkMessageEvent, editVkMessage, sendVkMessage, setVkTypingActivity } from './vkApi.js';
 
 const PAYLOAD_VERSION = 1;
 const SHOW_TRANSLATION_COMMAND = 'show_translation';
@@ -14,6 +14,7 @@ const HISTORY_COMPRESS_THRESHOLD = 16;
 const HISTORY_RETAIN_COUNT = 6;
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 const OPENROUTER_MODEL = 'deepseek/deepseek-v4-flash';
+const DONUT_PERIOD_DAYS = 30;
 
 export async function activateTextDialog(env, userId) {
   if (!env?.KV) {
@@ -165,6 +166,9 @@ export async function processTextQueueMessage(body, env) {
   const currentSummary = await getCurrentSummary(env.DB, userId);
   const recentHistory = await getRecentHistory(env.DB, userId, HISTORY_WINDOW_SIZE);
   const modelMessages = buildDialogMessages(currentSummary, recentHistory, userText);
+
+  // Non-blocking typing indicator while model is generating a response.
+  await setVkTypingActivity({ token: env.VK_TOKEN, peerId: userId });
 
   const assistantMessage = await requestOpenRouter({
     apiKey: env.OPENROUTER_API_KEY,
@@ -416,12 +420,12 @@ function buildDialogKeyboard(historyId) {
 
 async function checkAndIncrementLimit(db, userId, counterType) {
   const user = await db.prepare('SELECT subscription_tier FROM users_vk WHERE vk_id = ? LIMIT 1').bind(userId).first();
-  const donutState = await db
-    .prepare('SELECT action FROM donut_logs WHERE vk_id = ? ORDER BY created_at DESC, id DESC LIMIT 1')
+  const lastPaidDonut = await db
+    .prepare("SELECT created_at FROM donut_logs WHERE vk_id = ? AND action IN ('create', 'prolonged') ORDER BY created_at DESC, id DESC LIMIT 1")
     .bind(userId)
     .first();
 
-  const effectiveTier = resolveEffectiveTier(user?.subscription_tier, donutState?.action);
+  const effectiveTier = resolveEffectiveTier(user?.subscription_tier, lastPaidDonut?.created_at);
   if (effectiveTier !== (user?.subscription_tier || 'free')) {
     await db.prepare('UPDATE users_vk SET subscription_tier = ? WHERE vk_id = ?').bind(effectiveTier, userId).run();
   }
@@ -465,15 +469,46 @@ async function checkAndIncrementLimit(db, userId, counterType) {
 }
 
 function resolveEffectiveTier(currentTier, latestDonutAction) {
-  if (latestDonutAction === 'create' || latestDonutAction === 'prolonged') {
+  if (isDonutPeriodActive(latestDonutAction)) {
     return 'donut';
   }
 
-  if (latestDonutAction === 'expired' || latestDonutAction === 'cancelled') {
-    return 'free';
+  // Fallback for legacy profiles where donut_logs might be empty.
+  if (!latestDonutAction && currentTier === 'donut') {
+    return 'donut';
   }
 
-  return currentTier === 'donut' ? 'donut' : 'free';
+  return 'free';
+}
+
+function isDonutPeriodActive(lastPaidAtRaw) {
+  if (!lastPaidAtRaw) {
+    return false;
+  }
+
+  const paidAt = parseDbTimestamp(lastPaidAtRaw);
+  if (!paidAt) {
+    return false;
+  }
+
+  const expiresAt = new Date(paidAt.getTime() + DONUT_PERIOD_DAYS * 24 * 60 * 60 * 1000);
+  return Date.now() < expiresAt.getTime();
+}
+
+function parseDbTimestamp(value) {
+  const raw = String(value || '').trim();
+  if (!raw) {
+    return null;
+  }
+
+  const isoLike = raw.includes('T') ? raw : raw.replace(' ', 'T');
+  const withTimezone = /Z|[+-]\d\d:\d\d$/.test(isoLike) ? isoLike : `${isoLike}Z`;
+  const parsed = new Date(withTimezone);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+
+  return parsed;
 }
 
 async function compressHistoryIfNeeded(db, apiKey, userId) {

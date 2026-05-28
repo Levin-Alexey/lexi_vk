@@ -53,10 +53,6 @@ function resolveSubscriptionTier(action) {
     return 'donut';
   }
 
-  if (action === 'expired' || action === 'cancelled') {
-    return 'free';
-  }
-
   return null;
 }
 

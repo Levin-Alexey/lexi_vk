@@ -88,3 +88,20 @@ export async function answerVkMessageEvent({ token, eventId, userId, peerId, tex
 
   return { ok: true };
 }
+
+export async function setVkTypingActivity({ token, peerId }) {
+  if (!peerId) {
+    return { ok: true, skipped: true };
+  }
+
+  const result = await callVkMethod('messages.setActivity', token, {
+    peer_id: peerId,
+    type: 'typing',
+  });
+
+  if (!result.ok) {
+    return result;
+  }
+
+  return { ok: true };
+}
