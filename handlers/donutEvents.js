@@ -39,8 +39,25 @@ export async function handleDonutEvent(payload, env) {
     .bind(vkId, action, amount)
     .run();
 
+  const nextTier = resolveSubscriptionTier(action);
+  if (nextTier) {
+    await env.DB.prepare('UPDATE users_vk SET subscription_tier = ? WHERE vk_id = ?').bind(nextTier, vkId).run();
+  }
+
   console.log(`[DONUT] event=${eventType}, action=${action}, vk_id=${vkId}, amount=${amount}`);
   return { ok: true };
+}
+
+function resolveSubscriptionTier(action) {
+  if (action === 'create' || action === 'prolonged') {
+    return 'donut';
+  }
+
+  if (action === 'expired' || action === 'cancelled') {
+    return 'free';
+  }
+
+  return null;
 }
 
 function resolveDonutAmount(eventType, eventObject) {

@@ -3,8 +3,10 @@ import { handleExistingUser } from './handlers/existingUser.js';
 import { handleLexiChat, handleLexiMainMenu, isLexiChatCommand, isLexiMainMenuCommand } from './handlers/lexiChat.js';
 import { handleLexiVoice, isLexiVoiceCommand } from './handlers/chat/lexiVoice.js';
 import { handleLexiText, isLexiTextCommand } from './handlers/chat/lexiText.js';
+import { handleLexiDialog, isLexiDialogCommand } from './handlers/chat/lexiDialog.js';
 import { handleDonutEvent, isDonutEvent } from './handlers/donutEvents.js';
 import { handleQueueBatch } from './handlers/queueHandler.js';
+import { deactivateTextDialog, enqueueTextDialogMessage, isExitDialogCommand, isShowTranslationCommand, isTextDialogActive, revealAssistantTranslation } from './services/textDialog.js';
 import { answerVkMessageEvent, sendVkMessage } from './services/vkApi.js';
 
 const CONFIRMATION_CODE = '02c2fafa';
@@ -44,8 +46,12 @@ export default {
       return new Response('Bad Request', { status: 400 });
     }
 
-    // TODO этап 2: добавить строгую проверку секрета callback API.
-    console.log('[INFO] Проверка безопасности пропущена (добавим позже)');
+    if (payload.type !== 'confirmation') {
+      const secretValidation = validateVkCallbackSecret(payload, env);
+      if (!secretValidation.ok) {
+        return new Response('Forbidden', { status: 403 });
+      }
+    }
 
     if (payload.type === 'confirmation') {
       console.log('[CONFIRM] Отправляем confirmation');
@@ -118,7 +124,31 @@ export default {
         return okResponse();
       }
 
+      if (isLexiDialogCommand(eventPayload)) {
+        await handleLexiDialog({ userId, groupId, token: env.VK_TOKEN, env });
+        await answerVkMessageEvent({ token: env.VK_TOKEN, eventId: eventContext.eventId, userId, peerId: eventContext.peerId });
+        return okResponse();
+      }
+
+      if (isShowTranslationCommand(eventPayload)) {
+        await revealAssistantTranslation({
+          env,
+          token: env.VK_TOKEN,
+          payload: eventPayload,
+          eventContext,
+        });
+        return okResponse();
+      }
+
+      if (isExitDialogCommand(eventPayload)) {
+        await deactivateTextDialog(env, userId);
+        await handleLexiMainMenu({ userId, groupId, token: env.VK_TOKEN });
+        await answerVkMessageEvent({ token: env.VK_TOKEN, eventId: eventContext.eventId, userId, peerId: eventContext.peerId, text: 'Диалог завершен' });
+        return okResponse();
+      }
+
       if (isLexiMainMenuCommand(eventPayload)) {
+        await deactivateTextDialog(env, userId);
         await handleLexiMainMenu({ userId, groupId, token: env.VK_TOKEN });
         await answerVkMessageEvent({ token: env.VK_TOKEN, eventId: eventContext.eventId, userId, peerId: eventContext.peerId });
         return okResponse();
@@ -207,18 +237,37 @@ export default {
       }
 
       if (isLexiMainMenuCommand(parsedPayload)) {
+        await deactivateTextDialog(env, userId);
+        await handleLexiMainMenu({ userId, groupId, token: env.VK_TOKEN });
+        return okResponse();
+      }
+
+      if (text.toLowerCase() === 'меню') {
+        await deactivateTextDialog(env, userId);
         await handleLexiMainMenu({ userId, groupId, token: env.VK_TOKEN });
         return okResponse();
       }
 
       if (text.toLowerCase() === 'очистить' || text.toLowerCase() === 'clear') {
         await clearKeyboard(userId, 'Клавиатура удалена', env.VK_TOKEN, groupId);
+        return okResponse();
+      }
+
+      const isDialogActive = await isTextDialogActive(env, userId);
+      if (isDialogActive && text) {
+        await enqueueTextDialogMessage({
+          env,
+          userId,
+          groupId,
+          text,
+        });
+        return okResponse();
+      }
+
+      if (isFirstVisit) {
+        await sendFirstVisitMessage(userId, env.VK_TOKEN, groupId);
       } else {
-        if (isFirstVisit) {
-          await sendFirstVisitMessage(userId, env.VK_TOKEN, groupId);
-        } else {
-          await handleExistingUser({ userId, groupId, token: env.VK_TOKEN });
-        }
+        await handleExistingUser({ userId, groupId, token: env.VK_TOKEN });
       }
     }
 
@@ -254,6 +303,23 @@ function parseMessagePayload(rawPayload) {
 function isStartOnboarding(text, payload) {
   const normalizedText = (text || '').trim().toLowerCase();
   return (payload?.v === 1 && payload?.c === 'os') || normalizedText === 'начнем' || normalizedText === 'начнём';
+}
+
+function validateVkCallbackSecret(payload, env) {
+  const configuredSecret = env.VK_CALLBACK_SECRET || env.VK_SECRET;
+
+  if (!configuredSecret) {
+    console.warn('[SECURITY] VK callback secret не настроен (VK_CALLBACK_SECRET или VK_SECRET)');
+    return { ok: true, skipped: true };
+  }
+
+  const incomingSecret = typeof payload?.secret === 'string' ? payload.secret : '';
+  if (incomingSecret !== configuredSecret) {
+    console.error('[SECURITY] Отклонен callback: неверный секрет');
+    return { ok: false };
+  }
+
+  return { ok: true };
 }
 
 async function ensureUsersTable(db) {
