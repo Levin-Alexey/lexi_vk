@@ -3,6 +3,7 @@ import { handleExistingUser } from './handlers/existingUser.js';
 import { handleLexiChat, handleLexiMainMenu, isLexiChatCommand, isLexiMainMenuCommand } from './handlers/lexiChat.js';
 import { handleLexiVoice, isLexiVoiceCommand } from './handlers/chat/lexiVoice.js';
 import { handleLexiText, isLexiTextCommand } from './handlers/chat/lexiText.js';
+import { handleDonutEvent, isDonutEvent } from './handlers/donutEvents.js';
 import { handleQueueBatch } from './handlers/queueHandler.js';
 import { answerVkMessageEvent, sendVkMessage } from './services/vkApi.js';
 
@@ -54,6 +55,12 @@ export default {
           'content-type': 'text/plain',
         },
       });
+    }
+
+    if (isDonutEvent(payload.type)) {
+      await ensureUsersTable(env.DB);
+      await handleDonutEvent(payload, env);
+      return okResponse();
     }
 
     if (payload.type === 'message_event') {
