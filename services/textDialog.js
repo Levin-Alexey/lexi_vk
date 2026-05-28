@@ -107,12 +107,28 @@ export async function revealAssistantTranslation({ env, token, payload, eventCon
     historyRow.translation_ru,
   ].join('\n');
 
+  const exitKeyboard = {
+    inline: true,
+    buttons: [
+      [
+        {
+          action: {
+            type: 'callback',
+            label: 'Выйти в меню 🏠',
+            payload: exitDialogPayload(),
+          },
+          color: 'primary',
+        },
+      ],
+    ],
+  };
+
   const result = await editVkMessage({
     token,
     peerId: eventContext.peerId,
     conversationMessageId: eventContext.conversationMessageId,
     message: updatedText,
-    keyboard: { buttons: [] },
+    keyboard: exitKeyboard,
   });
 
   if (result.ok && !historyRow.translation_shown) {
@@ -163,9 +179,10 @@ export async function processTextQueueMessage(body, env) {
     return { ok: false, reason: 'daily_limit_reached' };
   }
 
+  const userLevel = limitCheck.level_id || 1;
   const currentSummary = await getCurrentSummary(env.DB, userId);
   const recentHistory = await getRecentHistory(env.DB, userId, HISTORY_WINDOW_SIZE);
-  const modelMessages = buildDialogMessages(currentSummary, recentHistory, userText);
+  const modelMessages = buildDialogMessages(currentSummary, recentHistory, userText, userLevel);
 
   // Non-blocking typing indicator while model is generating a response.
   await setVkTypingActivity({ token: env.VK_TOKEN, peerId: userId });
@@ -178,8 +195,14 @@ export async function processTextQueueMessage(body, env) {
 
   const parsedReply = parseAssistantReply(assistantMessage?.content);
   const englishReply = parsedReply.en;
-  const russianReply = parsedReply.ru;
+  let russianReply = parsedReply.ru;
+  const corrections = parsedReply.corrections || '';
   const serializedReasoning = safeJsonStringify(assistantMessage?.reasoning_details);
+
+  // Ensure translation always exists; if not provided, generate a fallback
+  if (!russianReply) {
+    russianReply = 'Я помогаю учить английский. Продолжай практиковаться!';
+  }
 
   await env.DB.prepare('INSERT INTO chat_history (vk_id, role, content) VALUES (?, ?, ?)').bind(userId, 'user', userText).run();
 
@@ -191,11 +214,14 @@ export async function processTextQueueMessage(body, env) {
   const assistantHistoryId = assistantInsert?.meta?.last_row_id || null;
   const keyboard = buildDialogKeyboard(assistantHistoryId);
 
+  // Combine main message with corrections if present
+  const fullMessage = corrections ? `${englishReply}\n\n${corrections}` : englishReply;
+
   await sendVkMessage({
     userId,
     groupId,
     token: env.VK_TOKEN,
-    message: englishReply,
+    message: fullMessage,
     keyboard,
   });
 
@@ -274,11 +300,11 @@ async function getRecentHistory(db, userId, limit) {
   return (result.results || []).reverse();
 }
 
-function buildDialogMessages(summary, historyRows, userText) {
+function buildDialogMessages(summary, historyRows, userText, level = 1) {
   const messages = [
     {
       role: 'system',
-      content: buildSystemPrompt(summary),
+      content: buildSystemPrompt(summary, level),
     },
   ];
 
@@ -307,15 +333,34 @@ function buildDialogMessages(summary, historyRows, userText) {
   return messages;
 }
 
-function buildSystemPrompt(summary) {
+function buildSystemPrompt(summary, level = 1) {
   const summaryText = summary || 'Нет накопленного саммари.';
+  let levelGuidance = '';
+
+  if (level === 1) {
+    levelGuidance = 'Level 1 (Novice): Use only basic vocabulary and simple sentence structures. Focus on present tense. Use short sentences. Explain all idioms.';
+  } else if (level === 2) {
+    levelGuidance = 'Level 2 (Basic): Use intermediate vocabulary and mix of tenses. Include some phrasal verbs. Explain any less common expressions.';
+  } else {
+    levelGuidance = 'Level 3 (Intermediate): Use advanced vocabulary, complex sentence structures, and varied tenses. Include idiomatic expressions. Assume comfort with English grammar.';
+  }
+
+  const correctionGuidance = [
+    'CRITICAL: If the user made ANY grammatical, spelling, or vocabulary errors in their message, include a "corrections" field.',
+    'In "corrections" field, write ONLY IN RUSSIAN: explain what was wrong and what is correct.',
+    'Format corrections as a concise block, e.g.: "❌ Your mistake: ... ✓ Correct: ..."',
+  ].join(' ');
+
   return [
-    'You are Lexi, a warm and concise AI English tutor for Russian-speaking users.',
-    'Use the stored conversation summary to adapt tone, pace, and examples.',
-    'Reply strictly as a JSON object with two string fields: "en" and "ru".',
-    'Field "en" must contain your main reply in natural English.',
-    'Field "ru" must contain an accurate Russian translation of the English reply.',
-    'Keep the answer useful, conversational, and not too long.',
+    'You are Lexi, a professional English tutor for Russian-speaking learners.',
+    levelGuidance,
+    'Your goal: help learners practice English, correct errors respectfully, and provide useful explanations.',
+    'Always provide both English and Russian versions of your responses.',
+    'Reply strictly as a JSON object with these fields:',
+    '- "en": your main reply in natural English',
+    '- "ru": accurate Russian translation of your English reply',
+    '- "corrections": (OPTIONAL, ONLY IF user made errors) Errors explained IN RUSSIAN ONLY',
+    correctionGuidance,
     `Conversation summary: ${summaryText}`,
   ].join(' ');
 }
@@ -362,9 +407,10 @@ function parseAssistantReply(rawContent) {
     const parsed = JSON.parse(normalized);
     const en = String(parsed?.en || '').trim();
     const ru = String(parsed?.ru || '').trim();
+    const corrections = String(parsed?.corrections || '').trim();
 
     if (en && ru) {
-      return { en, ru };
+      return { en, ru, corrections: corrections || undefined };
     }
   } catch {
     console.warn('[TEXT_DIALOG] Модель вернула невалидный JSON, используем fallback');
@@ -374,6 +420,7 @@ function parseAssistantReply(rawContent) {
   return {
     en: fallback,
     ru: 'Я на связи и готова помочь тебе практиковать английский.',
+    corrections: undefined,
   };
 }
 
@@ -419,19 +466,23 @@ function buildDialogKeyboard(historyId) {
 }
 
 async function checkAndIncrementLimit(db, userId, counterType) {
-  const user = await db.prepare('SELECT subscription_tier FROM users_vk WHERE vk_id = ? LIMIT 1').bind(userId).first();
-  const lastPaidDonut = await db
-    .prepare("SELECT created_at FROM donut_logs WHERE vk_id = ? AND action IN ('create', 'prolonged') ORDER BY created_at DESC, id DESC LIMIT 1")
+  const user = await db
+    .prepare('SELECT subscription_tier, subscription_until, level_id FROM users_vk WHERE vk_id = ? LIMIT 1')
     .bind(userId)
     .first();
+  const donutState = await getDonutAccessState(db, userId);
+  const effectiveTier = resolveEffectiveTier(user, donutState);
 
-  const effectiveTier = resolveEffectiveTier(user?.subscription_tier, lastPaidDonut?.created_at);
-  if (effectiveTier !== (user?.subscription_tier || 'free')) {
-    await db.prepare('UPDATE users_vk SET subscription_tier = ? WHERE vk_id = ?').bind(effectiveTier, userId).run();
+  if (donutState.lastPaidAt || donutState.lastStopAt) {
+    console.log(
+      `[LIMITS] vk_id=${userId} donut_last_paid_at=${donutState.lastPaidAt || 'none'} days_since_paid=${donutState.daysSincePaid ?? 'n/a'} donut_last_stop_at=${donutState.lastStopAt || 'none'} days_since_stop=${donutState.daysSinceStop ?? 'n/a'} donut_active=${donutState.isActive} source=${donutState.source}`
+    );
+  } else {
+    console.log(`[LIMITS] vk_id=${userId} donut_last_paid_at=none donut_active=false`);
   }
 
-  if (effectiveTier === 'donut') {
-    return { allowed: true };
+  if (effectiveTier !== (user?.subscription_tier || 'free')) {
+    await db.prepare('UPDATE users_vk SET subscription_tier = ? WHERE vk_id = ?').bind(effectiveTier, userId).run();
   }
 
   const today = new Date().toISOString().slice(0, 10);
@@ -443,9 +494,11 @@ async function checkAndIncrementLimit(db, userId, counterType) {
   const currentValue = Number(counter?.current_value || 0);
   const maxLimit = FREE_LIMITS[counterType] || 0;
 
-  if (currentValue >= maxLimit) {
+  // Donut users are never limited but we still record the count for analytics.
+  if (effectiveTier !== 'donut' && currentValue >= maxLimit) {
     return {
       allowed: false,
+      level_id: user?.level_id || 1,
       message: [
         'На сегодня лимит бесплатных сообщений закончился.',
         '',
@@ -465,50 +518,93 @@ async function checkAndIncrementLimit(db, userId, counterType) {
     .bind(userId, today, counterType)
     .run();
 
-  return { allowed: true };
+  return { allowed: true, level_id: user?.level_id || 1 };
 }
 
-function resolveEffectiveTier(currentTier, latestDonutAction) {
-  if (isDonutPeriodActive(latestDonutAction)) {
+function resolveEffectiveTier(user, donutState) {
+  const currentTier = user?.subscription_tier;
+
+  if (donutState.isActive) {
     return 'donut';
   }
 
-  // Fallback for legacy profiles where donut_logs might be empty.
-  if (!latestDonutAction && currentTier === 'donut') {
+  // Legacy fallback is allowed only while subscription_until is still in the future.
+  if (!donutState.hasAnyEvent && currentTier === 'donut' && isFutureTimestamp(user?.subscription_until)) {
     return 'donut';
   }
 
   return 'free';
 }
 
-function isDonutPeriodActive(lastPaidAtRaw) {
-  if (!lastPaidAtRaw) {
+function isFutureTimestamp(value) {
+  if (!value) {
     return false;
   }
 
-  const paidAt = parseDbTimestamp(lastPaidAtRaw);
-  if (!paidAt) {
+  const ts = Date.parse(String(value));
+  if (!Number.isFinite(ts)) {
     return false;
   }
 
-  const expiresAt = new Date(paidAt.getTime() + DONUT_PERIOD_DAYS * 24 * 60 * 60 * 1000);
-  return Date.now() < expiresAt.getTime();
+  return ts > Date.now();
 }
 
-function parseDbTimestamp(value) {
-  const raw = String(value || '').trim();
-  if (!raw) {
-    return null;
+async function getDonutAccessState(db, userId) {
+  // Guarantee the table exists — it may not if no Donut event was ever received.
+  await db
+    .prepare(`
+      CREATE TABLE IF NOT EXISTS donut_logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        vk_id BIGINT NOT NULL,
+        action TEXT NOT NULL,
+        amount INTEGER NOT NULL DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (vk_id) REFERENCES users_vk(vk_id)
+      )
+    `)
+    .run();
+
+  let row = null;
+  try {
+    row = await db
+      .prepare(`
+        SELECT
+          MAX(CASE WHEN action IN ('create', 'prolonged') THEN created_at END) AS last_paid_at,
+          CAST((julianday('now') - julianday(MAX(CASE WHEN action IN ('create', 'prolonged') THEN created_at END))) AS REAL) AS days_since_paid,
+          MAX(CASE WHEN action IN ('cancelled', 'expired') THEN created_at END) AS last_stop_at,
+          CAST((julianday('now') - julianday(MAX(CASE WHEN action IN ('cancelled', 'expired') THEN created_at END))) AS REAL) AS days_since_stop,
+          COUNT(*) AS total_events
+        FROM donut_logs
+        WHERE vk_id = ?
+      `)
+      .bind(userId)
+      .first();
+  } catch (err) {
+    console.error('[DONUT_STATE] Ошибка запроса donut_logs:', err);
+    return { lastPaidAt: null, lastStopAt: null, daysSincePaid: null, daysSinceStop: null, hasAnyEvent: false, isActive: false, source: 'error' };
   }
 
-  const isoLike = raw.includes('T') ? raw : raw.replace(' ', 'T');
-  const withTimezone = /Z|[+-]\d\d:\d\d$/.test(isoLike) ? isoLike : `${isoLike}Z`;
-  const parsed = new Date(withTimezone);
-  if (Number.isNaN(parsed.getTime())) {
-    return null;
-  }
+  const lastPaidAt = row?.last_paid_at || null;
+  const lastStopAt = row?.last_stop_at || null;
+  const daysSincePaid = Number(row?.days_since_paid);
+  const daysSinceStop = Number(row?.days_since_stop);
+  const hasAnyEvent = Number(row?.total_events || 0) > 0;
 
-  return parsed;
+  const paidWindowActive = Boolean(lastPaidAt) && Number.isFinite(daysSincePaid) && daysSincePaid < DONUT_PERIOD_DAYS;
+  const recoveryWindowActive = !lastPaidAt && Boolean(lastStopAt) && Number.isFinite(daysSinceStop) && daysSinceStop < DONUT_PERIOD_DAYS;
+
+  const isActive = paidWindowActive || recoveryWindowActive;
+  const source = paidWindowActive ? 'paid_event_window' : recoveryWindowActive ? 'recovery_stop_event_window' : 'none';
+
+  return {
+    lastPaidAt,
+    lastStopAt,
+    daysSincePaid: Number.isFinite(daysSincePaid) ? daysSincePaid.toFixed(2) : null,
+    daysSinceStop: Number.isFinite(daysSinceStop) ? daysSinceStop.toFixed(2) : null,
+    hasAnyEvent,
+    isActive,
+    source,
+  };
 }
 
 async function compressHistoryIfNeeded(db, apiKey, userId) {

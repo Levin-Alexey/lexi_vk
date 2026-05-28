@@ -39,10 +39,7 @@ export async function handleDonutEvent(payload, env) {
     .bind(vkId, action, amount)
     .run();
 
-  const nextTier = resolveSubscriptionTier(action);
-  if (nextTier) {
-    await env.DB.prepare('UPDATE users_vk SET subscription_tier = ? WHERE vk_id = ?').bind(nextTier, vkId).run();
-  }
+  await applySubscriptionState(env.DB, vkId, action);
 
   console.log(`[DONUT] event=${eventType}, action=${action}, vk_id=${vkId}, amount=${amount}`);
   return { ok: true };
@@ -53,7 +50,33 @@ function resolveSubscriptionTier(action) {
     return 'donut';
   }
 
+  if (action === 'expired') {
+    return 'free';
+  }
+
   return null;
+}
+
+async function applySubscriptionState(db, vkId, action) {
+  const nextTier = resolveSubscriptionTier(action);
+
+  if (action === 'create' || action === 'prolonged') {
+    await db
+      .prepare("UPDATE users_vk SET subscription_tier = ?, subscription_until = DATETIME('now', '+30 day') WHERE vk_id = ?")
+      .bind(nextTier, vkId)
+      .run();
+    return;
+  }
+
+  if (action === 'expired') {
+    await db
+      .prepare("UPDATE users_vk SET subscription_tier = ?, subscription_until = DATETIME('now') WHERE vk_id = ?")
+      .bind(nextTier, vkId)
+      .run();
+    return;
+  }
+
+  // Keep current tier for cancelled/price_changed. Access is decided by donut_logs windows.
 }
 
 function resolveDonutAmount(eventType, eventObject) {

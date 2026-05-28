@@ -49,6 +49,7 @@ export default {
     if (payload.type !== 'confirmation') {
       const secretValidation = validateVkCallbackSecret(payload, env);
       if (!secretValidation.ok) {
+        console.error(`[SECURITY] 403 для event=${payload.type} secret_in_payload="${payload?.secret}" configured=${Boolean(env.VK_CALLBACK_SECRET || env.VK_SECRET)}`);
         return new Response('Forbidden', { status: 403 });
       }
     }
