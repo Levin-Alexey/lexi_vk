@@ -3,6 +3,7 @@ import { handleExistingUser } from './handlers/existingUser.js';
 import { handleLexiChat, handleLexiMainMenu, isLexiChatCommand, isLexiMainMenuCommand } from './handlers/lexiChat.js';
 import { handleLexiVoice, isLexiVoiceCommand } from './handlers/chat/lexiVoice.js';
 import { handleLexiText, isLexiTextCommand } from './handlers/chat/lexiText.js';
+import { handleQueueBatch } from './handlers/queueHandler.js';
 import { answerVkMessageEvent, sendVkMessage } from './services/vkApi.js';
 
 const CONFIRMATION_CODE = '02c2fafa';
@@ -215,6 +216,10 @@ export default {
     }
 
     return okResponse();
+  },
+
+  async queue(batch, env, ctx) {
+    await handleQueueBatch(batch, env, ctx);
   },
 };
 

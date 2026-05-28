@@ -1,6 +1,5 @@
 name = "lexivk"
 main = "index.js"
-type = "service"
 compatibility_date = "2026-02-10"
 
 [[kv_namespaces]]
@@ -15,8 +14,17 @@ database_id = "848ff033-2d6c-4b3d-9727-1941c73d3295"
 binding = "VOICE_TASKS"
 queue = "voice-tasks"
 
+[[queues.producers]]
+binding = "TEXT_TASKS"
+queue = "text-tasks"
+
 [[queues.consumers]]
 queue = "voice-tasks"
 max_batch_size = 10
-dead_letter_queue = "my-queue-dlq"
+max_batch_timeout = 5
+
+[[queues.consumers]]
+queue = "text-tasks"
+max_batch_size = 10
+max_batch_timeout = 5
 
