@@ -27,6 +27,7 @@ export async function handleDonutEvent(payload, env) {
   }
 
   await ensureDonutLogsTable(env.DB);
+  const amountColumn = await resolveAmountColumn(env.DB);
 
   // Пользователь может оформить подписку до первого сообщения боту.
   await env.DB.prepare('INSERT OR IGNORE INTO users_vk (vk_id) VALUES (?)').bind(vkId).run();
@@ -34,7 +35,7 @@ export async function handleDonutEvent(payload, env) {
   const amount = resolveDonutAmount(eventType, eventObject);
 
   await env.DB
-    .prepare('INSERT INTO donut_logs (vk_id, action, amount) VALUES (?, ?, ?)')
+    .prepare(`INSERT INTO donut_logs (vk_id, action, ${amountColumn}) VALUES (?, ?, ?)`)
     .bind(vkId, action, amount)
     .run();
 
@@ -80,4 +81,21 @@ async function ensureDonutLogsTable(db) {
       )
     `)
     .run();
+}
+
+async function resolveAmountColumn(db) {
+  const tableInfo = await db.prepare('PRAGMA table_info(donut_logs)').all();
+  const columns = (tableInfo.results || []).map((column) => column.name);
+
+  if (columns.includes('amount')) {
+    return 'amount';
+  }
+
+  // Совместимость с ранее созданной ошибочной схемой: колонка named 'cancelled'.
+  if (columns.includes('cancelled')) {
+    return 'cancelled';
+  }
+
+  await db.prepare('ALTER TABLE donut_logs ADD COLUMN amount INTEGER NOT NULL DEFAULT 0').run();
+  return 'amount';
 }
