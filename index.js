@@ -4,6 +4,10 @@ import { handleLexiChat, handleLexiMainMenu, isLexiChatCommand, isLexiMainMenuCo
 import { handleLexiVoice, isLexiVoiceCommand } from './handlers/chat/lexiVoice.js';
 import { handleLexiText, isLexiTextCommand } from './handlers/chat/lexiText.js';
 import { handleLexiDialog, isLexiDialogCommand } from './handlers/chat/lexiDialog.js';
+import { handleProfileMenu, isProfileButtonText } from './handlers/main_menu/profile.js';
+import { handleReturnMainMenu, isReturnMainMenuButtonText } from './handlers/main_menu/returnMainMenu.js';
+import { handleSettingsInfoMenu, isSettingsInfoButtonText } from './handlers/main_menu/settingsInfo.js';
+import { handleShowTariffs, isShowTariffsCommand } from './handlers/serviceMessages.js';
 import { handleDonutEvent, isDonutEvent } from './handlers/donutEvents.js';
 import { handleQueueBatch } from './handlers/queueHandler.js';
 import { deactivateTextDialog, enqueueTextDialogMessage, isExitDialogCommand, isShowTranslationCommand, isTextDialogActive, revealAssistantTranslation } from './services/textDialog.js';
@@ -131,6 +135,12 @@ export default {
         return okResponse();
       }
 
+      if (isShowTariffsCommand(eventPayload)) {
+        await handleShowTariffs({ userId, groupId, token: env.VK_TOKEN });
+        await answerVkMessageEvent({ token: env.VK_TOKEN, eventId: eventContext.eventId, userId, peerId: eventContext.peerId });
+        return okResponse();
+      }
+
       if (isShowTranslationCommand(eventPayload)) {
         await revealAssistantTranslation({
           env,
@@ -243,6 +253,22 @@ export default {
         return okResponse();
       }
 
+      if (isProfileButtonText(text)) {
+        await handleProfileMenu({ userId, groupId, token: env.VK_TOKEN });
+        return okResponse();
+      }
+
+      if (isSettingsInfoButtonText(text)) {
+        await handleSettingsInfoMenu({ userId, groupId, token: env.VK_TOKEN });
+        return okResponse();
+      }
+
+      if (isReturnMainMenuButtonText(text)) {
+        await deactivateTextDialog(env, userId);
+        await handleReturnMainMenu({ userId, groupId, token: env.VK_TOKEN });
+        return okResponse();
+      }
+
       if (text.toLowerCase() === 'меню') {
         await deactivateTextDialog(env, userId);
         await handleLexiMainMenu({ userId, groupId, token: env.VK_TOKEN });
@@ -303,7 +329,7 @@ function parseMessagePayload(rawPayload) {
 
 function isStartOnboarding(text, payload) {
   const normalizedText = (text || '').trim().toLowerCase();
-  return (payload?.v === 1 && payload?.c === 'os') || normalizedText === 'начнем' || normalizedText === 'начнём';
+  return (payload?.v === 1 && payload?.c === 'os') || normalizedText === 'начать' || normalizedText === 'начнем' || normalizedText === 'начнём';
 }
 
 function validateVkCallbackSecret(payload, env) {

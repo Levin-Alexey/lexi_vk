@@ -1,13 +1,22 @@
 import { answerVkMessageEvent, editVkMessage, sendVkMessage, setVkTypingActivity } from './vkApi.js';
+import { sendLcoinRewardMessage } from '../handlers/lcoinMessages.js';
+import { registerMetricProgress } from './lcoinEngine.js';
+import { ensureLcoinTables } from './lcoinTables.js';
 
 const PAYLOAD_VERSION = 1;
 const SHOW_TRANSLATION_COMMAND = 'show_translation';
 const EXIT_DIALOG_COMMAND = 'exit_text_dialog';
+const SHOW_TARIFFS_COMMAND = 'show_tariffs';
 const TEXT_DIALOG_STATE_PREFIX = 'dialog_mode_';
 const TEXT_DIALOG_STATE = 'text_dialog';
 const TEXT_COUNTER_TYPE = 'text_msg';
-const FREE_LIMITS = {
-  text_msg: 5,
+
+// Daily message limits per subscription tier.
+const TIER_LIMITS = {
+  free:  { text_msg: 5   },
+  tier1: { text_msg: 50  },
+  tier2: { text_msg: 100 },
+  tier3: { text_msg: 150 },
 };
 const HISTORY_WINDOW_SIZE = 12;
 const HISTORY_COMPRESS_THRESHOLD = 16;
@@ -81,6 +90,31 @@ export function exitDialogPayload() {
   });
 }
 
+export function showTariffsPayload() {
+  return JSON.stringify({
+    v: PAYLOAD_VERSION,
+    c: SHOW_TARIFFS_COMMAND,
+  });
+}
+
+export function buildChooseTariffKeyboard() {
+  return {
+    inline: true,
+    buttons: [
+      [
+        {
+          action: {
+            type: 'callback',
+            label: 'Выбрать тариф',
+            payload: showTariffsPayload(),
+          },
+          color: 'primary',
+        },
+      ],
+    ],
+  };
+}
+
 export async function revealAssistantTranslation({ env, token, payload, eventContext }) {
   await ensureDialogTables(env?.DB);
 
@@ -107,28 +141,12 @@ export async function revealAssistantTranslation({ env, token, payload, eventCon
     historyRow.translation_ru,
   ].join('\n');
 
-  const exitKeyboard = {
-    inline: true,
-    buttons: [
-      [
-        {
-          action: {
-            type: 'callback',
-            label: 'Выйти в меню 🏠',
-            payload: exitDialogPayload(),
-          },
-          color: 'primary',
-        },
-      ],
-    ],
-  };
-
   const result = await editVkMessage({
     token,
     peerId: eventContext.peerId,
     conversationMessageId: eventContext.conversationMessageId,
     message: updatedText,
-    keyboard: exitKeyboard,
+    keyboard: { inline: true, buttons: [] },
   });
 
   if (result.ok && !historyRow.translation_shown) {
@@ -175,8 +193,21 @@ export async function processTextQueueMessage(body, env) {
       groupId,
       token: env.VK_TOKEN,
       message: limitCheck.message,
+      keyboard: limitCheck.keyboard,
     });
     return { ok: false, reason: 'daily_limit_reached' };
+  }
+
+  if (limitCheck.rewardProgress?.earned > 0) {
+    await sendLcoinRewardMessage({
+      userId,
+      groupId,
+      token: env.VK_TOKEN,
+      metricKey: limitCheck.rewardProgress.metricKey,
+      earned: limitCheck.rewardProgress.earned,
+      totalCount: limitCheck.rewardProgress.totalCount,
+      threshold: limitCheck.rewardProgress.threshold,
+    });
   }
 
   const userLevel = limitCheck.level_id || 1;
@@ -234,6 +265,8 @@ async function ensureDialogTables(db) {
     console.error('[D1_ERROR] DB binding отсутствует при работе с text dialog');
     return;
   }
+
+  await ensureLcoinTables(db);
 
   await db
     .prepare(`
@@ -448,17 +481,6 @@ function buildDialogKeyboard(historyId) {
     ]);
   }
 
-  buttons.push([
-    {
-      action: {
-        type: 'callback',
-        label: 'Выйти в меню 🏠',
-        payload: exitDialogPayload(),
-      },
-      color: 'primary',
-    },
-  ]);
-
   return {
     inline: true,
     buttons,
@@ -492,19 +514,29 @@ async function checkAndIncrementLimit(db, userId, counterType) {
     .first();
 
   const currentValue = Number(counter?.current_value || 0);
-  const maxLimit = FREE_LIMITS[counterType] || 0;
+  const maxLimit = TIER_LIMITS[effectiveTier]?.[counterType] ?? TIER_LIMITS.free[counterType];
 
-  // Donut users are never limited but we still record the count for analytics.
-  if (effectiveTier !== 'donut' && currentValue >= maxLimit) {
+  if (currentValue >= maxLimit) {
+    const isFree = effectiveTier === 'free';
+    const message = isFree
+      ? [
+          'На сегодня лимит бесплатных сообщений закончился.',
+          '',
+          `Для бесплатного режима доступно ${maxLimit} текстовых ответов в день.`,
+          'Оформи VK Donut, чтобы снять ограничения и общаться с Lexi без лимита.',
+        ].join('\n')
+      : [
+          'На сегодня лимит сообщений исчерпан.',
+          '',
+          `Твой дневной лимит (${maxLimit} сообщений) исчерпан.`,
+          'Лимит обновится завтра. Подожди или обнови подписку на следующий уровень.',
+        ].join('\n');
+
     return {
       allowed: false,
       level_id: user?.level_id || 1,
-      message: [
-        'На сегодня лимит бесплатных сообщений закончился.',
-        '',
-        'Для бесплатного режима доступно 5 текстовых ответов в день.',
-        'Оформи VK Donut, чтобы снять ограничения и общаться с Lexi без лимита.',
-      ].join('\n'),
+      message,
+      keyboard: buildChooseTariffKeyboard(),
     };
   }
 
@@ -518,19 +550,34 @@ async function checkAndIncrementLimit(db, userId, counterType) {
     .bind(userId, today, counterType)
     .run();
 
-  return { allowed: true, level_id: user?.level_id || 1 };
+  // Lcoin progression is cumulative and independent from daily limits.
+  const progressResult = await registerMetricProgress(db, userId, counterType);
+  if (progressResult?.ok) {
+    console.log(
+      `[LCOIN] vk_id=${userId} metric=${counterType} total=${progressResult.totalCount} threshold=${progressResult.threshold} earned=${progressResult.earned}`
+    );
+  }
+
+  return { allowed: true, level_id: user?.level_id || 1, rewardProgress: progressResult };
+}
+
+const PAID_TIERS = new Set(['tier1', 'tier2', 'tier3']);
+
+function isPaidTier(tier) {
+  return PAID_TIERS.has(tier);
 }
 
 function resolveEffectiveTier(user, donutState) {
   const currentTier = user?.subscription_tier;
 
-  if (donutState.isActive) {
-    return 'donut';
+  // Active donut subscription window — use the tier stored in the DB.
+  if (donutState.isActive && isPaidTier(currentTier)) {
+    return currentTier;
   }
 
-  // Legacy fallback is allowed only while subscription_until is still in the future.
-  if (!donutState.hasAnyEvent && currentTier === 'donut' && isFutureTimestamp(user?.subscription_until)) {
-    return 'donut';
+  // Legacy fallback: no events yet but subscription_until is in the future.
+  if (!donutState.hasAnyEvent && isPaidTier(currentTier) && isFutureTimestamp(user?.subscription_until)) {
+    return currentTier;
   }
 
   return 'free';

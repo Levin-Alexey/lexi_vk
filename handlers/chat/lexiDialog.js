@@ -1,5 +1,6 @@
 import { sendVkMessage } from '../../services/vkApi.js';
-import { activateTextDialog, exitDialogPayload } from '../../services/textDialog.js';
+import { buildPersistentMainMenuKeyboard } from '../main_menu/persistentKeyboard.js';
+import { activateTextDialog } from '../../services/textDialog.js';
 
 const PAYLOAD_VERSION = 1;
 const LEXI_DIALOG_COMMAND = 'lexi_dialog';
@@ -28,20 +29,6 @@ export async function handleLexiDialog({ userId, groupId, token, env }) {
       'Теперь просто отправь любое сообщение, и я отвечу на английском.',
       'Если понадобится, ты сможешь раскрыть перевод кнопкой под ответом.',
     ].join('\n'),
-    keyboard: {
-      inline: true,
-      buttons: [
-        [
-          {
-            action: {
-              type: 'callback',
-              label: 'Выйти в меню 🏠',
-              payload: exitDialogPayload(),
-            },
-            color: 'secondary',
-          },
-        ],
-      ],
-    },
+    keyboard: buildPersistentMainMenuKeyboard(),
   });
 }
