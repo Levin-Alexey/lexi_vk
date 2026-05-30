@@ -1,4 +1,5 @@
 import { processTextQueueMessage } from '../services/textDialog.js';
+import { processVoiceQueueMessage } from '../services/voiceDialog.js';
 
 export async function handleQueueBatch(batch, env, ctx) {
   console.log(`[QUEUE] Получен batch из очереди ${batch.queue}, messages=${batch.messages.length}`);
@@ -15,8 +16,7 @@ export async function handleQueueBatch(batch, env, ctx) {
 
 async function handleQueueMessage(queueName, body, env, ctx, messageId) {
   if (queueName === 'voice-tasks') {
-    console.log('[QUEUE][VOICE]', messageId, JSON.stringify(body));
-    return;
+    return processVoiceQueueMessage(body, env);
   }
 
   if (queueName === 'text-tasks') {

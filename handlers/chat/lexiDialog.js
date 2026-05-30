@@ -1,6 +1,7 @@
 import { sendVkMessage } from '../../services/vkApi.js';
 import { buildPersistentMainMenuKeyboard } from '../main_menu/persistentKeyboard.js';
 import { activateTextDialog } from '../../services/textDialog.js';
+import { deactivateVoiceDialog } from '../../services/voiceDialog.js';
 
 const PAYLOAD_VERSION = 1;
 const LEXI_DIALOG_COMMAND = 'lexi_dialog';
@@ -17,6 +18,7 @@ export function isLexiDialogCommand(payload) {
 }
 
 export async function handleLexiDialog({ userId, groupId, token, env }) {
+  await deactivateVoiceDialog(env, userId);
   await activateTextDialog(env, userId);
 
   return sendVkMessage({

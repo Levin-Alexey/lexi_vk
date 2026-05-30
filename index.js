@@ -2,6 +2,7 @@ import { handleOnboardingAction, handleStartOnboarding, isOnboardingCommand, onb
 import { handleExistingUser } from './handlers/existingUser.js';
 import { handleLexiChat, handleLexiMainMenu, isLexiChatCommand, isLexiMainMenuCommand } from './handlers/lexiChat.js';
 import { handleLexiVoice, isLexiVoiceCommand } from './handlers/chat/lexiVoice.js';
+import { handleLexiVoiceDialog, isLexiVoiceDialogCommand } from './handlers/chat/lexiVoiceDialog.js';
 import { handleLexiText, isLexiTextCommand } from './handlers/chat/lexiText.js';
 import { handleLexiDialog, isLexiDialogCommand } from './handlers/chat/lexiDialog.js';
 import { handleProfileMenu, isProfileButtonText } from './handlers/main_menu/profile.js';
@@ -11,6 +12,7 @@ import { handleShowTariffs, isShowTariffsCommand } from './handlers/serviceMessa
 import { handleDonutEvent, isDonutEvent } from './handlers/donutEvents.js';
 import { handleQueueBatch } from './handlers/queueHandler.js';
 import { deactivateTextDialog, enqueueTextDialogMessage, isExitDialogCommand, isShowTranslationCommand, isTextDialogActive, revealAssistantTranslation } from './services/textDialog.js';
+import { deactivateVoiceDialog, enqueueVoiceDialogMessage, handleVoiceRevealEvent, isVoiceDialogActive, isVoiceRevealCommand } from './services/voiceDialog.js';
 import { answerVkMessageEvent, sendVkMessage } from './services/vkApi.js';
 
 const CONFIRMATION_CODE = '02c2fafa';
@@ -129,6 +131,12 @@ export default {
         return okResponse();
       }
 
+      if (isLexiVoiceDialogCommand(eventPayload)) {
+        await handleLexiVoiceDialog({ userId, groupId, token: env.VK_TOKEN, env });
+        await answerVkMessageEvent({ token: env.VK_TOKEN, eventId: eventContext.eventId, userId, peerId: eventContext.peerId });
+        return okResponse();
+      }
+
       if (isLexiDialogCommand(eventPayload)) {
         await handleLexiDialog({ userId, groupId, token: env.VK_TOKEN, env });
         await answerVkMessageEvent({ token: env.VK_TOKEN, eventId: eventContext.eventId, userId, peerId: eventContext.peerId });
@@ -143,6 +151,16 @@ export default {
 
       if (isShowTranslationCommand(eventPayload)) {
         await revealAssistantTranslation({
+          env,
+          token: env.VK_TOKEN,
+          payload: eventPayload,
+          eventContext,
+        });
+        return okResponse();
+      }
+
+      if (isVoiceRevealCommand(eventPayload)) {
+        await handleVoiceRevealEvent({
           env,
           token: env.VK_TOKEN,
           payload: eventPayload,
@@ -247,8 +265,14 @@ export default {
         return okResponse();
       }
 
+      if (isLexiVoiceDialogCommand(parsedPayload)) {
+        await handleLexiVoiceDialog({ userId, groupId, token: env.VK_TOKEN, env });
+        return okResponse();
+      }
+
       if (isLexiMainMenuCommand(parsedPayload)) {
         await deactivateTextDialog(env, userId);
+        await deactivateVoiceDialog(env, userId);
         await handleLexiMainMenu({ userId, groupId, token: env.VK_TOKEN });
         return okResponse();
       }
@@ -265,12 +289,14 @@ export default {
 
       if (isReturnMainMenuButtonText(text)) {
         await deactivateTextDialog(env, userId);
+        await deactivateVoiceDialog(env, userId);
         await handleReturnMainMenu({ userId, groupId, token: env.VK_TOKEN });
         return okResponse();
       }
 
       if (text.toLowerCase() === 'меню') {
         await deactivateTextDialog(env, userId);
+        await deactivateVoiceDialog(env, userId);
         await handleLexiMainMenu({ userId, groupId, token: env.VK_TOKEN });
         return okResponse();
       }
@@ -287,6 +313,19 @@ export default {
           userId,
           groupId,
           text,
+        });
+        return okResponse();
+      }
+
+      const audioAttachment = findAudioMessageAttachment(message.attachments);
+      const isVoiceModeActive = await isVoiceDialogActive(env, userId);
+      if (isVoiceModeActive && audioAttachment?.link_mp3) {
+        await enqueueVoiceDialogMessage({
+          env,
+          userId,
+          groupId,
+          linkMp3: audioAttachment.link_mp3,
+          duration: Number(audioAttachment.duration),
         });
         return okResponse();
       }
@@ -432,4 +471,18 @@ async function clearKeyboard(userId, text, token, groupId) {
     message: text,
     keyboard: { buttons: [] },
   });
+}
+
+function findAudioMessageAttachment(attachments) {
+  if (!Array.isArray(attachments)) {
+    return null;
+  }
+
+  for (const attachment of attachments) {
+    if (attachment?.type === 'audio_message' && attachment?.audio_message?.link_mp3) {
+      return attachment.audio_message;
+    }
+  }
+
+  return null;
 }

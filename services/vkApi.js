@@ -105,3 +105,90 @@ export async function setVkTypingActivity({ token, peerId }) {
 
   return { ok: true };
 }
+
+export async function sendVkVoiceMessageFromMp3({ userId, groupId, token, mp3Bytes, message, mimeType = 'audio/mpeg', fileName = 'lexi-response.mp3' }) {
+  const uploadResult = await callVkMethod('docs.getMessagesUploadServer', token, {
+    type: 'audio_message',
+    peer_id: userId,
+  });
+
+  if (!uploadResult.ok || !uploadResult.response?.upload_url) {
+    return { ok: false, error: uploadResult.error || 'upload_server_unavailable' };
+  }
+
+  const formData = new FormData();
+  formData.append('file', new Blob([mp3Bytes], { type: mimeType }), fileName);
+
+  const uploadResponse = await fetch(uploadResult.response.upload_url, {
+    method: 'POST',
+    body: formData,
+  });
+
+  const uploadData = await uploadResponse.json();
+  if (!uploadResponse.ok || uploadData?.error || !uploadData?.file) {
+    console.error('[VK_ERROR] docs upload failed', JSON.stringify(uploadData));
+    return { ok: false, error: uploadData?.error || 'upload_failed' };
+  }
+
+  const saveResult = await callVkMethod('docs.save', token, {
+    file: uploadData.file,
+    title: 'Lexi Voice Response',
+  });
+
+  if (!saveResult.ok) {
+    return saveResult;
+  }
+
+  const savedDoc = extractSavedDoc(saveResult.response);
+  if (!savedDoc?.owner_id || !savedDoc?.id) {
+    console.error('[VK_ERROR] docs.save returned unsupported response shape', JSON.stringify(saveResult.response));
+    return { ok: false, error: 'invalid_doc_response' };
+  }
+
+  const accessKeyPart = savedDoc.access_key ? `_${savedDoc.access_key}` : '';
+  const attachment = `doc${savedDoc.owner_id}_${savedDoc.id}${accessKeyPart}`;
+
+  return sendVkMessage({
+    userId,
+    groupId,
+    token,
+    message,
+    attachment,
+  });
+}
+
+function extractSavedDoc(response) {
+  const first = Array.isArray(response) ? response[0] : response;
+  if (!first || typeof first !== 'object') {
+    return null;
+  }
+
+  if (first.owner_id && first.id) {
+    return {
+      owner_id: first.owner_id,
+      id: first.id,
+      access_key: first.access_key,
+    };
+  }
+
+  const nestedCandidates = [first.doc, first.audio_message, first.audio, first.message_audio, first.saved];
+  for (const candidate of nestedCandidates) {
+    if (candidate?.owner_id && candidate?.id) {
+      return {
+        owner_id: candidate.owner_id,
+        id: candidate.id,
+        access_key: candidate.access_key,
+      };
+    }
+  }
+
+  if (first.preview?.audio_msg && first.owner_id && first.id) {
+    return {
+      owner_id: first.owner_id,
+      id: first.id,
+      access_key: first.access_key,
+    };
+  }
+
+  return null;
+}

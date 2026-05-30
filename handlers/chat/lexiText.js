@@ -3,7 +3,7 @@ import { lexiDialogPayload } from './lexiDialog.js';
 
 const PAYLOAD_VERSION = 1;
 const LEXI_TEXT_COMMAND = 'lexi_text';
-const LEXI_TEXT_PHOTO_ATTACHMENT = 'photo175946972_457239743_460e7bd59d3d978db0';
+const LEXI_TEXT_PHOTO_ATTACHMENT = 'photo175946972_457239744_e2dede4d8dfb5301db';
 
 export function lexiTextPayload() {
   return JSON.stringify({
