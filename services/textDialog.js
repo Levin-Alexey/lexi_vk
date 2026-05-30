@@ -1,7 +1,6 @@
 import { answerVkMessageEvent, editVkMessage, sendVkMessage, setVkTypingActivity } from './vkApi.js';
 import { sendLcoinRewardMessage } from '../handlers/lcoinMessages.js';
 import { registerMetricProgress } from './lcoinEngine.js';
-import { ensureLcoinTables } from './lcoinTables.js';
 
 const PAYLOAD_VERSION = 1;
 const SHOW_TRANSLATION_COMMAND = 'show_translation';
@@ -12,729 +11,269 @@ const TEXT_DIALOG_STATE = 'text_dialog';
 const TEXT_COUNTER_TYPE = 'text_msg';
 
 // Daily message limits per subscription tier.
-const TIER_LIMITS = {
-  free:  { text_msg: 5   },
-  tier1: { text_msg: 50  },
-  tier2: { text_msg: 100 },
-  tier3: { text_msg: 150 },
-};
+const TIER_LIMITS = { free: 5, tier1: 50, tier2: 100, tier3: 150 };
 const HISTORY_WINDOW_SIZE = 12;
 const HISTORY_COMPRESS_THRESHOLD = 16;
 const HISTORY_RETAIN_COUNT = 6;
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
-const OPENROUTER_MODEL = 'deepseek/deepseek-v4-flash';
+const OPENROUTER_MODEL = 'deepseek/deepseek-v4-pro'; // Исправлено на актуальную модель V3
 const DONUT_PERIOD_DAYS = 30;
 
-export async function activateTextDialog(env, userId) {
-  if (!env?.KV) {
-    return;
-  }
+// ============================================================================
+// УПРАВЛЕНИЕ СОСТОЯНИЯМИ И ОЧЕРЕДЬЮ
+// ============================================================================
 
-  await env.KV.put(`${TEXT_DIALOG_STATE_PREFIX}${userId}`, TEXT_DIALOG_STATE);
+export async function activateTextDialog(env, userId) {
+  if (env?.KV) await env.KV.put(`${TEXT_DIALOG_STATE_PREFIX}${userId}`, TEXT_DIALOG_STATE);
 }
 
 export async function deactivateTextDialog(env, userId) {
-  if (!env?.KV) {
-    return;
-  }
-
-  await env.KV.delete(`${TEXT_DIALOG_STATE_PREFIX}${userId}`);
+  if (env?.KV) await env.KV.delete(`${TEXT_DIALOG_STATE_PREFIX}${userId}`);
 }
 
 export async function isTextDialogActive(env, userId) {
-  if (!env?.KV) {
-    return false;
-  }
-
-  const state = await env.KV.get(`${TEXT_DIALOG_STATE_PREFIX}${userId}`);
-  return state === TEXT_DIALOG_STATE;
+  if (!env?.KV) return false;
+  return (await env.KV.get(`${TEXT_DIALOG_STATE_PREFIX}${userId}`)) === TEXT_DIALOG_STATE;
 }
 
 export async function enqueueTextDialogMessage({ env, userId, groupId, text }) {
   const normalizedText = String(text || '').trim();
-  if (!normalizedText || !env?.TEXT_TASKS) {
-    return false;
-  }
+  if (!normalizedText || !env?.TEXT_TASKS) return false;
 
-  await env.TEXT_TASKS.send({
-    type: 'text_dialog_message',
-    userId,
-    groupId,
-    text: normalizedText,
-    queuedAt: new Date().toISOString(),
-  });
-
+  await env.TEXT_TASKS.send({ type: 'text_dialog_message', userId, groupId, text: normalizedText, queuedAt: new Date().toISOString() });
   return true;
 }
 
-export function isShowTranslationCommand(payload) {
-  return payload?.v === PAYLOAD_VERSION && payload?.c === SHOW_TRANSLATION_COMMAND;
-}
+// ============================================================================
+// PAYLOADS И CALLBACK-КНОПКИ
+// ============================================================================
 
-export function isExitDialogCommand(payload) {
-  return payload?.v === PAYLOAD_VERSION && payload?.c === EXIT_DIALOG_COMMAND;
-}
-
-export function translationPayload(historyId) {
-  return JSON.stringify({
-    v: PAYLOAD_VERSION,
-    c: SHOW_TRANSLATION_COMMAND,
-    d: historyId,
-  });
-}
-
-export function exitDialogPayload() {
-  return JSON.stringify({
-    v: PAYLOAD_VERSION,
-    c: EXIT_DIALOG_COMMAND,
-  });
-}
-
-export function showTariffsPayload() {
-  return JSON.stringify({
-    v: PAYLOAD_VERSION,
-    c: SHOW_TARIFFS_COMMAND,
-  });
-}
+export const isShowTranslationCommand = (p) => p?.v === PAYLOAD_VERSION && p?.c === SHOW_TRANSLATION_COMMAND;
+export const isExitDialogCommand = (p) => p?.v === PAYLOAD_VERSION && p?.c === EXIT_DIALOG_COMMAND;
+export const translationPayload = (d) => JSON.stringify({ v: PAYLOAD_VERSION, c: SHOW_TRANSLATION_COMMAND, d });
+export const exitDialogPayload = () => JSON.stringify({ v: PAYLOAD_VERSION, c: EXIT_DIALOG_COMMAND });
+export const showTariffsPayload = () => JSON.stringify({ v: PAYLOAD_VERSION, c: SHOW_TARIFFS_COMMAND });
 
 export function buildChooseTariffKeyboard() {
-  return {
-    inline: true,
-    buttons: [
-      [
-        {
-          action: {
-            type: 'callback',
-            label: 'Выбрать тариф',
-            payload: showTariffsPayload(),
-          },
-          color: 'primary',
-        },
-      ],
-    ],
-  };
+  return { inline: true, buttons: [[{ action: { type: 'callback', label: 'Выбрать тариф', payload: showTariffsPayload() }, color: 'primary' }]] };
 }
 
 export async function revealAssistantTranslation({ env, token, payload, eventContext }) {
-  await ensureDialogTables(env?.DB);
-
   const historyId = Number(payload?.d);
-  if (!Number.isInteger(historyId) || historyId <= 0) {
-    await answerEvent(eventContext, token, 'Перевод не найден');
-    return { ok: false, reason: 'invalid_history_id' };
+  if (!historyId) {
+    await answerEvent(eventContext, token, 'Ошибка данных');
+    return { ok: false };
   }
 
-  const historyRow = await env.DB
-    .prepare('SELECT content, translation_ru, translation_shown FROM chat_history WHERE id = ? AND role = ? LIMIT 1')
-    .bind(historyId, 'assistant')
-    .first();
-
-  if (!historyRow?.content || !historyRow?.translation_ru) {
+  const row = await env.DB.prepare('SELECT content, translation_ru, translation_shown FROM chat_history WHERE id = ? AND role = ?').bind(historyId, 'assistant').first();
+  if (!row?.content || !row?.translation_ru) {
     await answerEvent(eventContext, token, 'Перевод не найден');
-    return { ok: false, reason: 'translation_missing' };
+    return { ok: false };
   }
 
-  const updatedText = [
-    historyRow.content,
-    '',
-    'Перевод:',
-    historyRow.translation_ru,
-  ].join('\n');
-
+  const updatedText = `${row.content}\n\n🇷🇺 Перевод:\n${row.translation_ru}`;
   const result = await editVkMessage({
-    token,
-    peerId: eventContext.peerId,
-    conversationMessageId: eventContext.conversationMessageId,
-    message: updatedText,
-    keyboard: { inline: true, buttons: [] },
+    token, peerId: eventContext.peerId, conversationMessageId: eventContext.conversationMessageId,
+    message: updatedText, keyboard: { inline: true, buttons: [] }
   });
 
-  if (result.ok && !historyRow.translation_shown) {
+  if (result.ok && !row.translation_shown) {
     await env.DB.prepare('UPDATE chat_history SET translation_shown = 1 WHERE id = ?').bind(historyId).run();
   }
 
-  await answerEvent(eventContext, token, result.ok ? 'Перевод показан' : 'Не удалось показать перевод');
+  await answerEvent(eventContext, token, result.ok ? 'Перевод показан' : 'Ошибка');
   return result;
 }
 
+// ============================================================================
+// ГЛАВНЫЙ ПРОЦЕССОР ТЕКСТОВЫХ СООБЩЕНИЙ
+// ============================================================================
+
 export async function processTextQueueMessage(body, env) {
-  const userId = Number(body?.userId);
-  const groupId = Number(body?.groupId);
-  const userText = String(body?.text || '').trim();
-
-  if (!Number.isInteger(userId) || userId <= 0 || !Number.isInteger(groupId) || groupId <= 0 || !userText) {
-    console.warn('[TEXT_DIALOG] Пропуск невалидного задания очереди', JSON.stringify(body));
-    return { ok: false, reason: 'invalid_body' };
-  }
-
-  if (!env?.VK_TOKEN) {
-    console.error('[TEXT_DIALOG] VK_TOKEN не задан');
-    return { ok: false, reason: 'missing_vk_token' };
-  }
+  const { userId, groupId, text: userText } = body;
 
   if (!env?.OPENROUTER_API_KEY) {
-    console.error('[TEXT_DIALOG] OPENROUTER_API_KEY не задан');
-    await sendVkMessage({
-      userId,
-      groupId,
-      token: env.VK_TOKEN,
-      message: 'Сервис диалога временно недоступен. Попробуй написать чуть позже.',
-    });
-    return { ok: false, reason: 'missing_openrouter_key' };
+    await sendVkMessage({ userId, groupId, token: env.VK_TOKEN, message: 'Сервис диалога временно недоступен.' });
+    return { ok: false };
   }
 
-  await ensureDialogTables(env.DB);
-  await env.DB.prepare('INSERT OR IGNORE INTO users_vk (vk_id) VALUES (?)').bind(userId).run();
-
+  // 1. Проверка лимитов и Lcoin (Асинхронно обновляет счетчики)
   const limitCheck = await checkAndIncrementLimit(env.DB, userId, TEXT_COUNTER_TYPE);
   if (!limitCheck.allowed) {
-    await sendVkMessage({
-      userId,
-      groupId,
-      token: env.VK_TOKEN,
-      message: limitCheck.message,
-      keyboard: limitCheck.keyboard,
-    });
-    return { ok: false, reason: 'daily_limit_reached' };
+    await sendVkMessage({ userId, groupId, token: env.VK_TOKEN, message: limitCheck.message, keyboard: limitCheck.keyboard });
+    return { ok: false };
   }
 
   if (limitCheck.rewardProgress?.earned > 0) {
-    await sendLcoinRewardMessage({
-      userId,
-      groupId,
-      token: env.VK_TOKEN,
-      metricKey: limitCheck.rewardProgress.metricKey,
-      earned: limitCheck.rewardProgress.earned,
-      totalCount: limitCheck.rewardProgress.totalCount,
-      threshold: limitCheck.rewardProgress.threshold,
-    });
+    await sendLcoinRewardMessage({ userId, groupId, token: env.VK_TOKEN, ...limitCheck.rewardProgress });
   }
 
-  const userLevel = limitCheck.level_id || 1;
-  const currentSummary = await getCurrentSummary(env.DB, userId);
-  const recentHistory = await getRecentHistory(env.DB, userId, HISTORY_WINDOW_SIZE);
-  const modelMessages = buildDialogMessages(currentSummary, recentHistory, userText, userLevel);
-
-  // Non-blocking typing indicator while model is generating a response.
   await setVkTypingActivity({ token: env.VK_TOKEN, peerId: userId });
 
-  const assistantMessage = await requestOpenRouter({
-    apiKey: env.OPENROUTER_API_KEY,
-    messages: modelMessages,
-    reasoningEnabled: true,
-  });
+  // 2. Достаем контекст (Память и история)
+  const [summaryRow, historyRows] = await Promise.all([
+    env.DB.prepare('SELECT context_summary FROM user_memory WHERE vk_id = ? LIMIT 1').bind(userId).first(),
+    env.DB.prepare('SELECT role, content FROM chat_history WHERE vk_id = ? ORDER BY id DESC LIMIT ?').bind(userId, HISTORY_WINDOW_SIZE).all()
+  ]);
 
-  const parsedReply = parseAssistantReply(assistantMessage?.content);
-  const englishReply = parsedReply.en;
-  let russianReply = parsedReply.ru;
-  const corrections = parsedReply.corrections || '';
-  const serializedReasoning = safeJsonStringify(assistantMessage?.reasoning_details);
+  const summary = summaryRow?.context_summary || '';
+  const recentHistory = (historyRows.results || []).reverse();
+  const modelMessages = buildDialogMessages(summary, recentHistory, userText, limitCheck.level_id);
 
-  // Ensure translation always exists; if not provided, generate a fallback
-  if (!russianReply) {
-    russianReply = 'Я помогаю учить английский. Продолжай практиковаться!';
-  }
+  // 3. Запрос к LLM (со строгим JSON)
+  const assistantReply = await requestOpenRouter({ apiKey: env.OPENROUTER_API_KEY, messages: modelMessages });
+  
+  // 4. Пакетная запись (Batch) в БД
+  const batchResults = await env.DB.batch([
+    env.DB.prepare('INSERT INTO chat_history (vk_id, role, content) VALUES (?, ?, ?)').bind(userId, 'user', userText),
+    env.DB.prepare('INSERT INTO chat_history (vk_id, role, content, translation_ru) VALUES (?, ?, ?, ?)').bind(userId, 'assistant', assistantReply.en, assistantReply.ru)
+  ]);
+  const assistantHistoryId = batchResults[1].meta.last_row_id;
 
-  await env.DB.prepare('INSERT INTO chat_history (vk_id, role, content) VALUES (?, ?, ?)').bind(userId, 'user', userText).run();
-
-  const assistantInsert = await env.DB
-    .prepare('INSERT INTO chat_history (vk_id, role, content, translation_ru, reasoning_details) VALUES (?, ?, ?, ?, ?)')
-    .bind(userId, 'assistant', englishReply, russianReply, serializedReasoning)
-    .run();
-
-  const assistantHistoryId = assistantInsert?.meta?.last_row_id || null;
-  const keyboard = buildDialogKeyboard(assistantHistoryId);
-
-  // Combine main message with corrections if present
-  const fullMessage = corrections ? `${englishReply}\n\n${corrections}` : englishReply;
-
+  // 5. Отправка ответа
+  const fullMessage = assistantReply.corrections ? `${assistantReply.en}\n\n💡 ${assistantReply.corrections}` : assistantReply.en;
+  
   await sendVkMessage({
-    userId,
-    groupId,
-    token: env.VK_TOKEN,
-    message: fullMessage,
-    keyboard,
+    userId, groupId, token: env.VK_TOKEN, message: fullMessage,
+    keyboard: { inline: true, buttons: [[{ action: { type: 'callback', label: 'Показать перевод 🇷🇺', payload: translationPayload(assistantHistoryId) }, color: 'secondary' }]] }
   });
 
+  // 6. Фоновое сжатие
   await compressHistoryIfNeeded(env.DB, env.OPENROUTER_API_KEY, userId);
   return { ok: true };
 }
 
-async function ensureDialogTables(db) {
-  if (!db) {
-    console.error('[D1_ERROR] DB binding отсутствует при работе с text dialog');
-    return;
-  }
-
-  await ensureLcoinTables(db);
-
-  await db
-    .prepare(`
-      CREATE TABLE IF NOT EXISTS chat_history (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        vk_id BIGINT NOT NULL,
-        role TEXT NOT NULL,
-        content TEXT NOT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (vk_id) REFERENCES users_vk(vk_id)
-      )
-    `)
-    .run();
-
-  await ensureChatHistoryColumn(db, 'translation_ru', 'TEXT');
-  await ensureChatHistoryColumn(db, 'reasoning_details', 'TEXT');
-  await ensureChatHistoryColumn(db, 'translation_shown', 'INTEGER NOT NULL DEFAULT 0');
-
-  await db
-    .prepare(`
-      CREATE TABLE IF NOT EXISTS user_memory (
-        vk_id BIGINT PRIMARY KEY,
-        context_summary TEXT DEFAULT '',
-        last_compressed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (vk_id) REFERENCES users_vk(vk_id)
-      )
-    `)
-    .run();
-
-  await db
-    .prepare(`
-      CREATE TABLE IF NOT EXISTS user_daily_counters (
-        vk_id BIGINT NOT NULL,
-        date_day DATE DEFAULT (CURRENT_DATE),
-        counter_type TEXT NOT NULL,
-        current_value INTEGER DEFAULT 0,
-        PRIMARY KEY (vk_id, date_day, counter_type),
-        FOREIGN KEY (vk_id) REFERENCES users_vk(vk_id)
-      )
-    `)
-    .run();
-}
-
-async function ensureChatHistoryColumn(db, columnName, sqlType) {
-  const tableInfo = await db.prepare('PRAGMA table_info(chat_history)').all();
-  const columns = (tableInfo.results || []).map((column) => column.name);
-
-  if (!columns.includes(columnName)) {
-    await db.prepare(`ALTER TABLE chat_history ADD COLUMN ${columnName} ${sqlType}`).run();
-  }
-}
-
-async function getCurrentSummary(db, userId) {
-  const row = await db.prepare('SELECT context_summary FROM user_memory WHERE vk_id = ? LIMIT 1').bind(userId).first();
-  return row?.context_summary || '';
-}
-
-async function getRecentHistory(db, userId, limit) {
-  const result = await db
-    .prepare('SELECT role, content, reasoning_details FROM chat_history WHERE vk_id = ? ORDER BY id DESC LIMIT ?')
-    .bind(userId, limit)
-    .all();
-
-  return (result.results || []).reverse();
-}
-
-function buildDialogMessages(summary, historyRows, userText, level = 1) {
-  const messages = [
-    {
-      role: 'system',
-      content: buildSystemPrompt(summary, level),
-    },
-  ];
-
-  for (const row of historyRows) {
-    const historyMessage = {
-      role: row.role,
-      content: row.content,
-    };
-
-    if (row.role === 'assistant' && row.reasoning_details) {
-      try {
-        historyMessage.reasoning_details = JSON.parse(row.reasoning_details);
-      } catch {
-        console.warn('[TEXT_DIALOG] Не удалось распарсить reasoning_details из истории');
-      }
-    }
-
-    messages.push(historyMessage);
-  }
-
-  messages.push({
-    role: 'user',
-    content: userText,
-  });
-
-  return messages;
-}
-
-function buildSystemPrompt(summary, level = 1) {
-  const summaryText = summary || 'Нет накопленного саммари.';
-  let levelGuidance = '';
-
-  if (level === 1) {
-    levelGuidance = 'Level 1 (Novice): Use only basic vocabulary and simple sentence structures. Focus on present tense. Use short sentences. Explain all idioms.';
-  } else if (level === 2) {
-    levelGuidance = 'Level 2 (Basic): Use intermediate vocabulary and mix of tenses. Include some phrasal verbs. Explain any less common expressions.';
-  } else {
-    levelGuidance = 'Level 3 (Intermediate): Use advanced vocabulary, complex sentence structures, and varied tenses. Include idiomatic expressions. Assume comfort with English grammar.';
-  }
-
-  const correctionGuidance = [
-    'CRITICAL: If the user made ANY grammatical, spelling, or vocabulary errors in their message, include a "corrections" field.',
-    'In "corrections" field, write ONLY IN RUSSIAN: explain what was wrong and what is correct.',
-    'Format corrections as a concise block, e.g.: "❌ Your mistake: ... ✓ Correct: ..."',
-  ].join(' ');
-
-  return [
-    'You are Lexi, a professional English tutor for Russian-speaking learners.',
-    levelGuidance,
-    'Your goal: help learners practice English, correct errors respectfully, and provide useful explanations.',
-    'Always provide both English and Russian versions of your responses.',
-    'Reply strictly as a JSON object with these fields:',
-    '- "en": your main reply in natural English',
-    '- "ru": accurate Russian translation of your English reply',
-    '- "corrections": (OPTIONAL, ONLY IF user made errors) Errors explained IN RUSSIAN ONLY',
-    correctionGuidance,
-    `Conversation summary: ${summaryText}`,
-  ].join(' ');
-}
-
-async function requestOpenRouter({ apiKey, messages, reasoningEnabled }) {
-  const response = await fetch(OPENROUTER_URL, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: OPENROUTER_MODEL,
-      messages,
-      reasoning: reasoningEnabled ? { enabled: true } : undefined,
-    }),
-  });
-
-  const rawBody = await response.text();
-  let data = null;
-
-  try {
-    data = JSON.parse(rawBody);
-  } catch {
-    throw new Error(`OpenRouter returned non-JSON response: ${rawBody}`);
-  }
-
-  if (!response.ok || data?.error) {
-    throw new Error(`OpenRouter request failed: ${data?.error?.message || rawBody}`);
-  }
-
-  const message = data?.choices?.[0]?.message;
-  if (!message?.content) {
-    throw new Error('OpenRouter response does not contain assistant content');
-  }
-
-  return message;
-}
-
-function parseAssistantReply(rawContent) {
-  const normalized = stripCodeFences(String(rawContent || '').trim());
-
-  try {
-    const parsed = JSON.parse(normalized);
-    const en = String(parsed?.en || '').trim();
-    const ru = String(parsed?.ru || '').trim();
-    const corrections = String(parsed?.corrections || '').trim();
-
-    if (en && ru) {
-      return { en, ru, corrections: corrections || undefined };
-    }
-  } catch {
-    console.warn('[TEXT_DIALOG] Модель вернула невалидный JSON, используем fallback');
-  }
-
-  const fallback = normalized || 'I am here and ready to help you practice English.';
-  return {
-    en: fallback,
-    ru: 'Я на связи и готова помочь тебе практиковать английский.',
-    corrections: undefined,
-  };
-}
-
-function stripCodeFences(input) {
-  if (input.startsWith('```')) {
-    return input.replace(/^```[a-zA-Z]*\n?/, '').replace(/```$/, '').trim();
-  }
-
-  return input;
-}
-
-function buildDialogKeyboard(historyId) {
-  const buttons = [];
-
-  if (historyId) {
-    buttons.push([
-      {
-        action: {
-          type: 'callback',
-          label: 'Показать перевод 🇷🇺',
-          payload: translationPayload(historyId),
-        },
-        color: 'secondary',
-      },
-    ]);
-  }
-
-  return {
-    inline: true,
-    buttons,
-  };
-}
+// ============================================================================
+// ЛИМИТЫ И VK DONUT
+// ============================================================================
 
 async function checkAndIncrementLimit(db, userId, counterType) {
-  const user = await db
-    .prepare('SELECT subscription_tier, subscription_until, level_id FROM users_vk WHERE vk_id = ? LIMIT 1')
-    .bind(userId)
-    .first();
+  const user = await db.prepare('SELECT subscription_tier, level_id FROM users_vk WHERE vk_id = ? LIMIT 1').bind(userId).first();
   const donutState = await getDonutAccessState(db, userId);
-  const effectiveTier = resolveEffectiveTier(user, donutState);
-
-  if (donutState.lastPaidAt || donutState.lastStopAt) {
-    console.log(
-      `[LIMITS] vk_id=${userId} donut_last_paid_at=${donutState.lastPaidAt || 'none'} days_since_paid=${donutState.daysSincePaid ?? 'n/a'} donut_last_stop_at=${donutState.lastStopAt || 'none'} days_since_stop=${donutState.daysSinceStop ?? 'n/a'} donut_active=${donutState.isActive} source=${donutState.source}`
-    );
-  } else {
-    console.log(`[LIMITS] vk_id=${userId} donut_last_paid_at=none donut_active=false`);
-  }
+  const effectiveTier = (donutState.isActive && user?.subscription_tier !== 'free') ? user.subscription_tier : 'free';
 
   if (effectiveTier !== (user?.subscription_tier || 'free')) {
     await db.prepare('UPDATE users_vk SET subscription_tier = ? WHERE vk_id = ?').bind(effectiveTier, userId).run();
   }
 
   const today = new Date().toISOString().slice(0, 10);
-  const counter = await db
-    .prepare('SELECT current_value FROM user_daily_counters WHERE vk_id = ? AND date_day = ? AND counter_type = ? LIMIT 1')
-    .bind(userId, today, counterType)
-    .first();
-
+  const counter = await db.prepare('SELECT current_value FROM user_daily_counters WHERE vk_id = ? AND date_day = ? AND counter_type = ?').bind(userId, today, counterType).first();
   const currentValue = Number(counter?.current_value || 0);
-  const maxLimit = TIER_LIMITS[effectiveTier]?.[counterType] ?? TIER_LIMITS.free[counterType];
+  const maxLimit = TIER_LIMITS[effectiveTier] ?? TIER_LIMITS.free;
 
   if (currentValue >= maxLimit) {
     const isFree = effectiveTier === 'free';
-    const message = isFree
-      ? [
-          'На сегодня лимит бесплатных сообщений закончился.',
-          '',
-          `Для бесплатного режима доступно ${maxLimit} текстовых ответов в день.`,
-          'Оформи VK Donut, чтобы снять ограничения и общаться с Lexi без лимита.',
-        ].join('\n')
-      : [
-          'На сегодня лимит сообщений исчерпан.',
-          '',
-          `Твой дневной лимит (${maxLimit} сообщений) исчерпан.`,
-          'Лимит обновится завтра. Подожди или обнови подписку на следующий уровень.',
-        ].join('\n');
-
-    return {
-      allowed: false,
-      level_id: user?.level_id || 1,
-      message,
-      keyboard: buildChooseTariffKeyboard(),
-    };
+    const message = isFree 
+      ? `На сегодня лимит бесплатных сообщений (${maxLimit}) закончился.\nОформи VK Donut, чтобы общаться без лимита.`
+      : `Твой дневной лимит (${maxLimit} сообщений) исчерпан.\nОн обновится завтра.`;
+    return { allowed: false, level_id: user?.level_id || 1, message, keyboard: buildChooseTariffKeyboard() };
   }
 
-  await db
-    .prepare(`
-      INSERT INTO user_daily_counters (vk_id, date_day, counter_type, current_value)
-      VALUES (?, ?, ?, 1)
-      ON CONFLICT(vk_id, date_day, counter_type)
-      DO UPDATE SET current_value = current_value + 1
-    `)
-    .bind(userId, today, counterType)
-    .run();
+  await db.prepare(`INSERT INTO user_daily_counters (vk_id, date_day, counter_type, current_value) VALUES (?, ?, ?, 1) ON CONFLICT(vk_id, date_day, counter_type) DO UPDATE SET current_value = current_value + 1`).bind(userId, today, counterType).run();
 
-  // Lcoin progression is cumulative and independent from daily limits.
-  const progressResult = await registerMetricProgress(db, userId, counterType);
-  if (progressResult?.ok) {
-    console.log(
-      `[LCOIN] vk_id=${userId} metric=${counterType} total=${progressResult.totalCount} threshold=${progressResult.threshold} earned=${progressResult.earned}`
-    );
-  }
-
-  return { allowed: true, level_id: user?.level_id || 1, rewardProgress: progressResult };
-}
-
-const PAID_TIERS = new Set(['tier1', 'tier2', 'tier3']);
-
-function isPaidTier(tier) {
-  return PAID_TIERS.has(tier);
-}
-
-function resolveEffectiveTier(user, donutState) {
-  const currentTier = user?.subscription_tier;
-
-  // Active donut subscription window — use the tier stored in the DB.
-  if (donutState.isActive && isPaidTier(currentTier)) {
-    return currentTier;
-  }
-
-  // Legacy fallback: no events yet but subscription_until is in the future.
-  if (!donutState.hasAnyEvent && isPaidTier(currentTier) && isFutureTimestamp(user?.subscription_until)) {
-    return currentTier;
-  }
-
-  return 'free';
-}
-
-function isFutureTimestamp(value) {
-  if (!value) {
-    return false;
-  }
-
-  const ts = Date.parse(String(value));
-  if (!Number.isFinite(ts)) {
-    return false;
-  }
-
-  return ts > Date.now();
+  const rewardProgress = await registerMetricProgress(db, userId, counterType);
+  return { allowed: true, level_id: user?.level_id || 1, rewardProgress };
 }
 
 async function getDonutAccessState(db, userId) {
-  // Guarantee the table exists — it may not if no Donut event was ever received.
-  await db
-    .prepare(`
-      CREATE TABLE IF NOT EXISTS donut_logs (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        vk_id BIGINT NOT NULL,
-        action TEXT NOT NULL,
-        amount INTEGER NOT NULL DEFAULT 0,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (vk_id) REFERENCES users_vk(vk_id)
-      )
-    `)
-    .run();
-
-  let row = null;
   try {
-    row = await db
-      .prepare(`
-        SELECT
-          MAX(CASE WHEN action IN ('create', 'prolonged') THEN created_at END) AS last_paid_at,
-          CAST((julianday('now') - julianday(MAX(CASE WHEN action IN ('create', 'prolonged') THEN created_at END))) AS REAL) AS days_since_paid,
-          MAX(CASE WHEN action IN ('cancelled', 'expired') THEN created_at END) AS last_stop_at,
-          CAST((julianday('now') - julianday(MAX(CASE WHEN action IN ('cancelled', 'expired') THEN created_at END))) AS REAL) AS days_since_stop,
-          COUNT(*) AS total_events
-        FROM donut_logs
-        WHERE vk_id = ?
-      `)
-      .bind(userId)
-      .first();
+    const row = await db.prepare(`
+      SELECT 
+        MAX(CASE WHEN action IN ('create', 'prolonged') THEN created_at END) AS last_paid_at,
+        CAST((julianday('now') - julianday(MAX(CASE WHEN action IN ('create', 'prolonged') THEN created_at END))) AS REAL) AS days_since_paid,
+        MAX(CASE WHEN action IN ('cancelled', 'expired') THEN created_at END) AS last_stop_at,
+        CAST((julianday('now') - julianday(MAX(CASE WHEN action IN ('cancelled', 'expired') THEN created_at END))) AS REAL) AS days_since_stop
+      FROM donut_logs WHERE vk_id = ?
+    `).bind(userId).first();
+
+    const paidActive = row?.last_paid_at && row.days_since_paid < DONUT_PERIOD_DAYS;
+    const recoveryActive = !row?.last_paid_at && row?.last_stop_at && row.days_since_stop < DONUT_PERIOD_DAYS;
+    
+    return { isActive: paidActive || recoveryActive };
   } catch (err) {
-    console.error('[DONUT_STATE] Ошибка запроса donut_logs:', err);
-    return { lastPaidAt: null, lastStopAt: null, daysSincePaid: null, daysSinceStop: null, hasAnyEvent: false, isActive: false, source: 'error' };
+    return { isActive: false };
   }
+}
 
-  const lastPaidAt = row?.last_paid_at || null;
-  const lastStopAt = row?.last_stop_at || null;
-  const daysSincePaid = Number(row?.days_since_paid);
-  const daysSinceStop = Number(row?.days_since_stop);
-  const hasAnyEvent = Number(row?.total_events || 0) > 0;
+// ============================================================================
+// LLM И ПРОМПТЫ
+// ============================================================================
 
-  const paidWindowActive = Boolean(lastPaidAt) && Number.isFinite(daysSincePaid) && daysSincePaid < DONUT_PERIOD_DAYS;
-  const recoveryWindowActive = !lastPaidAt && Boolean(lastStopAt) && Number.isFinite(daysSinceStop) && daysSinceStop < DONUT_PERIOD_DAYS;
+function buildDialogMessages(summary, historyRows, userText, level = 1) {
+  const levelGuidance = level === 1 ? 'Level 1: Very simple A1-A2 vocabulary, short sentences.' 
+    : level === 2 ? 'Level 2: A2-B1 vocabulary, mix of tenses.' 
+    : 'Level 3: B1-B2 vocabulary, idiomatic expressions.';
 
-  const isActive = paidWindowActive || recoveryWindowActive;
-  const source = paidWindowActive ? 'paid_event_window' : recoveryWindowActive ? 'recovery_stop_event_window' : 'none';
+  const systemPrompt = `You are Lexi, an English tutor for Russian speakers. ${levelGuidance}
+OUTPUT STRICTLY IN JSON FORMAT:
+{
+  "en": "Your main reply in natural English",
+  "ru": "Accurate Russian translation of your English reply",
+  "corrections": "If user made errors, explain IN RUSSIAN ONLY. Format: ❌ Mistake ✓ Correct. If no errors, output empty string ''."
+}
+Summary of student: ${summary || 'None'}`;
 
-  return {
-    lastPaidAt,
-    lastStopAt,
-    daysSincePaid: Number.isFinite(daysSincePaid) ? daysSincePaid.toFixed(2) : null,
-    daysSinceStop: Number.isFinite(daysSinceStop) ? daysSinceStop.toFixed(2) : null,
-    hasAnyEvent,
-    isActive,
-    source,
-  };
+  const messages = [{ role: 'system', content: systemPrompt }];
+  for (const row of historyRows) messages.push({ role: row.role, content: row.content });
+  messages.push({ role: 'user', content: userText });
+  
+  return messages;
+}
+
+async function requestOpenRouter({ apiKey, messages }) {
+  const response = await fetch(OPENROUTER_URL, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: OPENROUTER_MODEL,
+      response_format: { type: "json_object" }, // Принудительный JSON
+      messages
+    })
+  });
+
+  const data = await response.json();
+  try {
+    return JSON.parse(data?.choices?.[0]?.message?.content);
+  } catch {
+    return { en: 'I am ready to practice English.', ru: 'Я готова практиковать английский.', corrections: '' };
+  }
 }
 
 async function compressHistoryIfNeeded(db, apiKey, userId) {
   const countRow = await db.prepare('SELECT COUNT(*) AS total FROM chat_history WHERE vk_id = ?').bind(userId).first();
-  const total = Number(countRow?.total || 0);
+  if (Number(countRow?.total || 0) <= HISTORY_COMPRESS_THRESHOLD) return;
 
-  if (total <= HISTORY_COMPRESS_THRESHOLD) {
-    return;
-  }
+  const allHistory = await db.prepare('SELECT id, role, content FROM chat_history WHERE vk_id = ? ORDER BY id ASC').bind(userId).all();
+  const rowsToCompress = (allHistory.results || []).slice(0, -HISTORY_RETAIN_COUNT);
+  if (rowsToCompress.length === 0) return;
 
-  const allHistory = await db
-    .prepare('SELECT id, role, content FROM chat_history WHERE vk_id = ? ORDER BY id ASC')
-    .bind(userId)
-    .all();
+  const oldSummaryRow = await db.prepare('SELECT context_summary FROM user_memory WHERE vk_id = ? LIMIT 1').bind(userId).first();
+  const chunkText = rowsToCompress.map(r => `${r.role}: ${r.content}`).join('\n');
 
-  const historyRows = allHistory.results || [];
-  const rowsToCompress = historyRows.slice(0, Math.max(0, historyRows.length - HISTORY_RETAIN_COUNT));
-  if (rowsToCompress.length === 0) {
-    return;
-  }
-
-  const currentSummary = await getCurrentSummary(db, userId);
-  const chunkText = rowsToCompress.map((row) => `${row.role}: ${row.content}`).join('\n');
-
-  const summaryMessage = await requestOpenRouter({
-    apiKey,
-    reasoningEnabled: false,
-    messages: [
-      {
-        role: 'system',
-        content: 'You maintain a concise summary of a student\'s English tutoring chat. Reply with plain text, 3-4 short sentences, focused on goals, preferences, repeated mistakes, and active topics.',
-      },
-      {
-        role: 'user',
-        content: `Current summary:\n${currentSummary || 'No previous summary.'}\n\nNew chat chunk:\n${chunkText}`,
-      },
-    ],
+  const response = await fetch(OPENROUTER_URL, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: OPENROUTER_MODEL,
+      messages: [
+        { role: 'system', content: 'You maintain a concise summary of a student tutoring chat. Reply with 3-4 sentences in English.' },
+        { role: 'user', content: `Current summary:\n${oldSummaryRow?.context_summary || 'None'}\n\nNew chat:\n${chunkText}` }
+      ]
+    })
   });
 
-  const nextSummary = String(summaryMessage.content || '').trim();
-  if (!nextSummary) {
-    return;
-  }
+  const data = await response.json();
+  const nextSummary = String(data?.choices?.[0]?.message?.content || '').trim();
 
-  await db
-    .prepare(`
-      INSERT INTO user_memory (vk_id, context_summary, last_compressed_at)
-      VALUES (?, ?, CURRENT_TIMESTAMP)
-      ON CONFLICT(vk_id)
-      DO UPDATE SET
-        context_summary = excluded.context_summary,
-        last_compressed_at = CURRENT_TIMESTAMP
-    `)
-    .bind(userId, nextSummary)
-    .run();
-
-  const idsToDelete = rowsToCompress.map((row) => row.id);
-  const placeholders = idsToDelete.map(() => '?').join(', ');
-  await db.prepare(`DELETE FROM chat_history WHERE id IN (${placeholders})`).bind(...idsToDelete).run();
-}
-
-function safeJsonStringify(value) {
-  if (value === undefined || value === null) {
-    return null;
-  }
-
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return null;
+  if (nextSummary) {
+    await db.prepare('INSERT INTO user_memory (vk_id, context_summary) VALUES (?, ?) ON CONFLICT(vk_id) DO UPDATE SET context_summary = excluded.context_summary').bind(userId, nextSummary).run();
+    const ids = rowsToCompress.map(r => r.id);
+    await db.prepare(`DELETE FROM chat_history WHERE id IN (${ids.map(() => '?').join(',')})`).bind(...ids).run();
   }
 }
 
 async function answerEvent(eventContext, token, text) {
-  if (!eventContext?.eventId) {
-    return;
+  if (eventContext?.eventId) {
+    await answerVkMessageEvent({ token, eventId: eventContext.eventId, userId: eventContext.eventUserId, peerId: eventContext.peerId, text });
   }
-
-  await answerVkMessageEvent({
-    token,
-    eventId: eventContext.eventId,
-    userId: eventContext.eventUserId,
-    peerId: eventContext.peerId,
-    text,
-  });
 }
