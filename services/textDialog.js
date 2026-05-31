@@ -204,14 +204,41 @@ function buildDialogMessages(summary, historyRows, userText, level = 1) {
     : level === 2 ? 'Level 2: A2-B1 vocabulary, mix of tenses.' 
     : 'Level 3: B1-B2 vocabulary, idiomatic expressions.';
 
-  const systemPrompt = `You are Lexi, an English tutor for Russian speakers. ${levelGuidance}
-OUTPUT STRICTLY IN JSON FORMAT:
+  const systemPrompt = `You are Lexi, a professional English teacher and personal language coach for Russian-speaking learners.
+
+PERSONALITY:
+- Be warm, patient, supportive, and attentive.
+- Help the learner feel safe to make mistakes and keep practicing.
+- Explain clearly and kindly, never shame the learner.
+
+CORE BEHAVIOR:
+- Always answer the latest user message directly.
+- Use memory only as supporting context; never replace latest intent.
+- Keep replies practical, clear, and useful for progress.
+
+TEXT-DIALOG RULE (CRITICAL):
+- Treat this as a text chat conversation.
+- Prefer writing-related verbs and phrasing: "write", "type", "send", "text", "rewrite", "message".
+- Avoid speaking-first wording like "say", "speak", "pronounce" in normal replies.
+- EXCEPTION: when you intentionally ask for memorization practice, you may ask the learner to repeat or say a phrase aloud.
+
+ENGAGEMENT RULE (MANDATORY):
+- Every English reply must end with one clear question to keep the dialogue going.
+
+LEVEL ADAPTATION:
+- ${levelGuidance}
+
+MEMORY CONTEXT:
+LONG-TERM MEMORY: ${summary || 'None'}
+
+OUTPUT CONTRACT (STRICT JSON ONLY):
 {
-  "en": "Your main reply in natural English",
-  "ru": "Accurate Russian translation of your English reply",
-  "corrections": "If user made errors, explain IN RUSSIAN ONLY. Format: ❌ Mistake ✓ Correct. If no errors, output empty string ''."
+  "en": "Your final English tutor reply for text dialogue, ending with a question.",
+  "ru": "Accurate Russian translation of en.",
+  "corrections": "If user made real grammar/spelling/vocabulary mistakes, provide a short explanation in Russian. If no real mistakes, return ''."
 }
-Summary of student: ${summary || 'None'}`;
+
+Return only valid JSON. No markdown. No extra keys.`;
 
   const messages = [{ role: 'system', content: systemPrompt }];
   for (const row of historyRows) messages.push({ role: row.role, content: row.content });
@@ -231,12 +258,45 @@ async function requestOpenRouter({ apiKey, messages }) {
     })
   });
 
-  const data = await response.json();
+  const rawBody = await response.text();
+  let data = null;
+
   try {
-    return JSON.parse(data?.choices?.[0]?.message?.content);
+    data = JSON.parse(rawBody);
   } catch {
-    return { en: 'I am ready to practice English.', ru: 'Я готова практиковать английский.', corrections: '' };
+    return normalizeTextReply(null);
   }
+
+  if (!response.ok || data?.error) {
+    return normalizeTextReply(null);
+  }
+
+  try {
+    const parsed = JSON.parse(String(data?.choices?.[0]?.message?.content || '{}'));
+    return normalizeTextReply(parsed);
+  } catch {
+    return normalizeTextReply(null);
+  }
+}
+
+function normalizeTextReply(parsed) {
+  let en = String(parsed?.en || '').trim();
+  const ru = String(parsed?.ru || '').trim();
+  const corrections = String(parsed?.corrections || '').trim();
+
+  if (!en) {
+    en = 'Great, let us keep practicing in text. What would you like to write next?';
+  }
+
+  if (!/[?]\s*$/.test(en)) {
+    en = `${en.replace(/[.!]+\s*$/, '').trim()}?`;
+  }
+
+  return {
+    en,
+    ru: ru || 'Отлично, давай продолжим практику в текстовом формате. Что ты хочешь написать дальше?',
+    corrections,
+  };
 }
 
 async function compressHistoryIfNeeded(db, apiKey, userId) {

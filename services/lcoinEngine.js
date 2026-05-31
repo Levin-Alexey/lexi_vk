@@ -4,7 +4,7 @@ const LCOIN_REWARD_AMOUNT = 10;
 
 const METRIC_RULES = {
   text_msg: { threshold: 100, reason: 'milestone_text_100' },
-  voice_msg: { threshold: 30, reason: 'milestone_voice_30' },
+  voice_msg: { threshold: 100, reason: 'milestone_voice_100' },
 };
 
 export async function registerMetricProgress(db, vkId, metricKey) {

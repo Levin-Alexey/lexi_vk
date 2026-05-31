@@ -1,8 +1,11 @@
 import { answerVkMessageEvent, editVkMessage, sendVkMessage, sendVkVoiceMessageFromMp3, setVkTypingActivity } from './vkApi.js';
+import { sendLcoinRewardMessage } from '../handlers/lcoinMessages.js';
+import { registerMetricProgress } from './lcoinEngine.js';
 
 const PAYLOAD_VERSION = 1;
 const VOICE_REVEAL_EN_COMMAND = 'voice_show_en';
 const VOICE_REVEAL_RU_COMMAND = 'voice_show_ru';
+const SHOW_TARIFFS_COMMAND = 'show_tariffs';
 const VOICE_DIALOG_STATE_PREFIX = 'dialog_mode_';
 const VOICE_DIALOG_STATE = 'voice_dialog';
 const VOICE_MAX_DURATION_SECONDS = 45;
@@ -15,6 +18,9 @@ const OPENROUTER_REPLY_MODEL = 'deepseek/deepseek-chat'; // V3 - идеален 
 const OPENAI_TTS_MODEL = 'tts-1'; // Самый быстрый и дешевый для озвучки
 const OPENAI_TTS_VOICE = 'nova';
 
+const VOICE_COUNTER_TYPE = 'voice_msg';
+const VOICE_TIER_LIMITS = { free: 3, tier1: 20, tier2: 30, tier3: 50 };
+const DONUT_PERIOD_DAYS = 30;
 const HISTORY_COMPRESS_THRESHOLD = 16;
 const HISTORY_RETAIN_COUNT = 6;
 
@@ -96,6 +102,24 @@ export async function handleVoiceRevealEvent({ env, token, payload, eventContext
 export async function processVoiceQueueMessage(body, env) {
   const { userId, groupId, linkMp3, duration } = body;
 
+  await env.DB.prepare('INSERT OR IGNORE INTO users_vk (vk_id) VALUES (?)').bind(userId).run();
+
+  const limitCheck = await checkAndIncrementVoiceLimit(env.DB, userId, VOICE_COUNTER_TYPE);
+  if (!limitCheck.allowed) {
+    await sendVkMessage({
+      userId,
+      groupId,
+      token: env.VK_TOKEN,
+      message: limitCheck.message,
+      keyboard: limitCheck.keyboard,
+    });
+    return { ok: false, reason: 'voice_daily_limit_reached' };
+  }
+
+  if (limitCheck.rewardProgress?.earned > 0) {
+    await sendLcoinRewardMessage({ userId, groupId, token: env.VK_TOKEN, ...limitCheck.rewardProgress });
+  }
+
   if (duration > VOICE_MAX_DURATION_SECONDS) {
     await sendVkMessage({ userId, groupId, token: env.VK_TOKEN, message: `Сообщение слишком длинное 🫶 (макс. ${VOICE_MAX_DURATION_SECONDS} сек).` });
     return { ok: false };
@@ -171,6 +195,87 @@ export async function processVoiceQueueMessage(body, env) {
   }
 }
 
+async function checkAndIncrementVoiceLimit(db, userId, counterType) {
+  const user = await db.prepare('SELECT subscription_tier FROM users_vk WHERE vk_id = ? LIMIT 1').bind(userId).first();
+  const donutState = await getDonutAccessState(db, userId);
+  const effectiveTier = (donutState.isActive && user?.subscription_tier !== 'free') ? user.subscription_tier : 'free';
+
+  if (effectiveTier !== (user?.subscription_tier || 'free')) {
+    await db.prepare('UPDATE users_vk SET subscription_tier = ? WHERE vk_id = ?').bind(effectiveTier, userId).run();
+  }
+
+  const today = new Date().toISOString().slice(0, 10);
+  const counter = await db
+    .prepare('SELECT current_value FROM user_daily_counters WHERE vk_id = ? AND date_day = ? AND counter_type = ?')
+    .bind(userId, today, counterType)
+    .first();
+
+  const currentValue = Number(counter?.current_value || 0);
+  const maxLimit = VOICE_TIER_LIMITS[effectiveTier] ?? VOICE_TIER_LIMITS.free;
+
+  if (currentValue >= maxLimit) {
+    const isFree = effectiveTier === 'free';
+    const message = isFree
+      ? `На сегодня лимит голосовых сообщений (${maxLimit}) закончился. Оформи подписку, чтобы увеличить лимит.`
+      : `Твой дневной лимит голосовых сообщений (${maxLimit}) исчерпан. Он обновится завтра.`;
+    return { allowed: false, message, keyboard: buildChooseTariffKeyboard() };
+  }
+
+  await db
+    .prepare(`
+      INSERT INTO user_daily_counters (vk_id, date_day, counter_type, current_value)
+      VALUES (?, ?, ?, 1)
+      ON CONFLICT(vk_id, date_day, counter_type)
+      DO UPDATE SET current_value = current_value + 1
+    `)
+    .bind(userId, today, counterType)
+    .run();
+
+  const rewardProgress = await registerMetricProgress(db, userId, counterType);
+  return { allowed: true, rewardProgress };
+}
+
+async function getDonutAccessState(db, userId) {
+  try {
+    const row = await db.prepare(`
+      SELECT
+        MAX(CASE WHEN action IN ('create', 'prolonged') THEN created_at END) AS last_paid_at,
+        CAST((julianday('now') - julianday(MAX(CASE WHEN action IN ('create', 'prolonged') THEN created_at END))) AS REAL) AS days_since_paid,
+        MAX(CASE WHEN action IN ('cancelled', 'expired') THEN created_at END) AS last_stop_at,
+        CAST((julianday('now') - julianday(MAX(CASE WHEN action IN ('cancelled', 'expired') THEN created_at END))) AS REAL) AS days_since_stop
+      FROM donut_logs WHERE vk_id = ?
+    `).bind(userId).first();
+
+    const paidActive = row?.last_paid_at && row.days_since_paid < DONUT_PERIOD_DAYS;
+    const recoveryActive = !row?.last_paid_at && row?.last_stop_at && row.days_since_stop < DONUT_PERIOD_DAYS;
+    return { isActive: paidActive || recoveryActive };
+  } catch {
+    return { isActive: false };
+  }
+}
+
+function showTariffsPayload() {
+  return JSON.stringify({ v: PAYLOAD_VERSION, c: SHOW_TARIFFS_COMMAND });
+}
+
+function buildChooseTariffKeyboard() {
+  return {
+    inline: true,
+    buttons: [
+      [
+        {
+          action: {
+            type: 'callback',
+            label: 'Выбрать тариф',
+            payload: showTariffsPayload(),
+          },
+          color: 'primary',
+        },
+      ],
+    ],
+  };
+}
+
 // ============================================================================
 // API ИНТЕГРАЦИИ (OPENAI & OPENROUTER)
 // ============================================================================
@@ -212,19 +317,51 @@ async function generateUltimateReply(apiKey, transcript, summary, memoryLines, l
     ? 'Use everyday A2-B1 vocabulary. 2-3 short sentences.'
     : 'Use natural B1-B2 vocabulary. Keep it conversational.';
 
-  const systemPrompt = `You are Lexi, a friendly English tutor.
-Always answer the user's latest message directly. Use memory only for context.
+  const systemPrompt = `You are Lexi, a professional English teacher and personal language coach for Russian-speaking learners.
 
+PERSONALITY:
+- Be warm, patient, supportive, and emotionally attentive.
+- Encourage progress and reduce fear of mistakes.
+- Explain clearly, never shame the learner.
+
+CORE BEHAVIOR:
+- Always answer the user's latest message directly.
+- Use memory only as context; never ignore or replace the latest user intent.
+- Keep replies practical and useful for active learning.
+
+VOICE-DIALOG RULE (CRITICAL):
+- Treat this as a voice-message tutoring dialogue where the learner replies by voice.
+- Prefer spoken-action verbs and phrasing: "say", "tell", "speak", "repeat", "pronounce", "answer aloud", "send a voice message".
+- Keep guidance natural for oral practice and short voice exchanges.
+- Avoid writing-first wording like "type", "write", "text" unless absolutely necessary.
+- Exception: when a short written example is useful, keep it minimal and return to voice-first instructions.
+
+CORRECTIONS DELIVERY RULE (CRITICAL):
+- Even in voice mode, corrections are delivered to the learner as a TEXT block.
+- Write corrections in Russian, concise and actionable (1-3 short lines).
+- You may include pronunciation feedback when it is clearly inferred from the user's utterance.
+- If pronunciation is uncertain, do not invent it; focus on grammar/vocabulary only.
+
+ENGAGEMENT RULE (MANDATORY):
+- Every English reply MUST end with one clear, motivating question that invites the learner to continue.
+- Exactly one final question mark at the end is preferred.
+
+LEVEL ADAPTATION:
+- ${levelRule}
+
+MEMORY CONTEXT:
 LONG-TERM MEMORY: ${summary || 'None'}
 SHORT-TERM MEMORY:
 ${memoryLines.join('\n')}
 
-OUTPUT STRICTLY IN JSON FORMAT:
+OUTPUT CONTRACT (STRICT JSON ONLY):
 {
-  "en": "Your spoken English reply to the user. ${levelRule}",
-  "ru": "Accurate Russian translation of your reply.",
-  "corrections": "If user made grammar/pronunciation mistakes, explain them briefly in Russian. If no mistakes, output an empty string ''."
-}`;
+  "en": "Your final English tutor reply for voice dialogue, natural for speaking practice, ending with a question.",
+  "ru": "Accurate Russian translation of en.",
+  "corrections": "If user made real grammar/spelling/vocabulary mistakes, provide a short explanation in Russian. If no real mistake, return ''."
+}
+
+Do not add markdown, commentary, or extra keys. Return only a valid JSON object.`;
 
   const response = await fetch(OPENROUTER_CHAT_URL, {
     method: 'POST',
@@ -239,12 +376,45 @@ OUTPUT STRICTLY IN JSON FORMAT:
     })
   });
 
-  const data = await response.json();
+  const rawBody = await response.text();
+  let data = null;
+
   try {
-    return JSON.parse(data.choices[0].message.content);
-  } catch (e) {
-    return { en: "I understood you, let's keep going!", ru: "Я поняла тебя, продолжаем!", corrections: "" };
+    data = JSON.parse(rawBody);
+  } catch {
+    return normalizeVoiceReply(null);
   }
+
+  if (!response.ok || data?.error) {
+    return normalizeVoiceReply(null);
+  }
+
+  try {
+    const parsed = JSON.parse(String(data?.choices?.[0]?.message?.content || '{}'));
+    return normalizeVoiceReply(parsed);
+  } catch {
+    return normalizeVoiceReply(null);
+  }
+}
+
+function normalizeVoiceReply(parsed) {
+  let en = String(parsed?.en || '').trim();
+  const ru = String(parsed?.ru || '').trim();
+  const corrections = String(parsed?.corrections || '').trim();
+
+  if (!en) {
+    en = 'Great, let us continue practicing together. What would you like to talk about next?';
+  }
+
+  if (!/[?]\s*$/.test(en)) {
+    en = `${en.replace(/[.!]+\s*$/, '').trim()}?`;
+  }
+
+  return {
+    en,
+    ru: ru || 'Отлично, давай продолжим практику. О чем ты хочешь поговорить дальше?',
+    corrections,
+  };
 }
 
 async function compressHistoryIfNeeded(db, apiKey, userId) {
