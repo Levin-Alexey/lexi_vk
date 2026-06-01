@@ -1,7 +1,10 @@
 import { handleOnboardingAction, handleStartOnboarding, isOnboardingCommand, onboardingPayload } from './handlers/startOnboarding.js';
 import { handleExistingUser } from './handlers/existingUser.js';
+import { handleAddDictionaryWord, handleAddDictionaryWordAction, isAddDictionaryWordActionCommand, isAddDictionaryWordCommand } from './handlers/dictionary/addWord.js';
+import { handleDictionaryGame, isDictionaryGameCommand } from './handlers/dictionary/rememberWordGame.js';
 import { handleLexiChat, handleLexiMainMenu, isLexiChatCommand, isLexiMainMenuCommand } from './handlers/lexiChat.js';
 import { handleLexiDictionary, isLexiDictionaryCommand } from './handlers/dictionary/myDictionary.js';
+import { handleMyDictionaryWords, isMyDictionaryWordsCommand } from './handlers/dictionary/myWords.js';
 import { handleLexiVoice, isLexiVoiceCommand } from './handlers/chat/lexiVoice.js';
 import { handleLexiVoiceDialog, isLexiVoiceDialogCommand } from './handlers/chat/lexiVoiceDialog.js';
 import { handleLexiText, isLexiTextCommand } from './handlers/chat/lexiText.js';
@@ -122,6 +125,30 @@ export default {
 
       if (isLexiDictionaryCommand(eventPayload)) {
         await handleLexiDictionary({ userId, groupId, token: env.VK_TOKEN });
+        await answerVkMessageEvent({ token: env.VK_TOKEN, eventId: eventContext.eventId, userId, peerId: eventContext.peerId });
+        return okResponse();
+      }
+
+      if (isAddDictionaryWordCommand(eventPayload)) {
+        await handleAddDictionaryWord({ userId, groupId, token: env.VK_TOKEN });
+        await answerVkMessageEvent({ token: env.VK_TOKEN, eventId: eventContext.eventId, userId, peerId: eventContext.peerId });
+        return okResponse();
+      }
+
+      if (isAddDictionaryWordActionCommand(eventPayload)) {
+        await handleAddDictionaryWordAction({ env, userId, groupId, token: env.VK_TOKEN });
+        await answerVkMessageEvent({ token: env.VK_TOKEN, eventId: eventContext.eventId, userId, peerId: eventContext.peerId });
+        return okResponse();
+      }
+
+      if (isMyDictionaryWordsCommand(eventPayload)) {
+        await handleMyDictionaryWords({ userId, groupId, token: env.VK_TOKEN });
+        await answerVkMessageEvent({ token: env.VK_TOKEN, eventId: eventContext.eventId, userId, peerId: eventContext.peerId });
+        return okResponse();
+      }
+
+      if (isDictionaryGameCommand(eventPayload)) {
+        await handleDictionaryGame({ userId, groupId, token: env.VK_TOKEN });
         await answerVkMessageEvent({ token: env.VK_TOKEN, eventId: eventContext.eventId, userId, peerId: eventContext.peerId });
         return okResponse();
       }

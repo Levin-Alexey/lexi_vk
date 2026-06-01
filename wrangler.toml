@@ -2,6 +2,9 @@ name = "lexivk"
 main = "index.js"
 compatibility_date = "2026-02-10"
 
+[vars]
+R2_PUBLIC_BASE_URL = "https://pub-3c07f333ebcc4cb69dc369beb8d7086a.r2.dev"
+
 [[kv_namespaces]]
 binding = "KV"
 id = "9180f73744b349bd86fe9810fc61001f"
