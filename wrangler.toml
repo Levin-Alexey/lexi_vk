@@ -10,6 +10,11 @@ id = "9180f73744b349bd86fe9810fc61001f"
 binding = "DB"
 database_id = "848ff033-2d6c-4b3d-9727-1941c73d3295"
 
+[[r2_buckets]]
+binding = "MY_R2_BUCKET"
+bucket_name = "lexi-media"
+
+# Temporarily disabled queues. Re-enable after creating Cloudflare Queues resources.
 [[queues.producers]]
 binding = "VOICE_TASKS"
 queue = "voice-tasks"
@@ -18,6 +23,10 @@ queue = "voice-tasks"
 binding = "TEXT_TASKS"
 queue = "text-tasks"
 
+# [[queues.producers]]
+# binding = "DICTIONARY_TASKS"
+# queue = "dictionary-tasks"
+
 [[queues.consumers]]
 queue = "voice-tasks"
 max_batch_size = 10
@@ -27,4 +36,10 @@ max_batch_timeout = 5
 queue = "text-tasks"
 max_batch_size = 10
 max_batch_timeout = 5
+
+# [[queues.consumers]]
+# queue = "dictionary-tasks"
+# max_batch_size = 5
+# max_batch_timeout = 2
+# max_concurrency = 5
 

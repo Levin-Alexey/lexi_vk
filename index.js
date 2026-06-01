@@ -1,6 +1,7 @@
 import { handleOnboardingAction, handleStartOnboarding, isOnboardingCommand, onboardingPayload } from './handlers/startOnboarding.js';
 import { handleExistingUser } from './handlers/existingUser.js';
 import { handleLexiChat, handleLexiMainMenu, isLexiChatCommand, isLexiMainMenuCommand } from './handlers/lexiChat.js';
+import { handleLexiDictionary, isLexiDictionaryCommand } from './handlers/dictionary/myDictionary.js';
 import { handleLexiVoice, isLexiVoiceCommand } from './handlers/chat/lexiVoice.js';
 import { handleLexiVoiceDialog, isLexiVoiceDialogCommand } from './handlers/chat/lexiVoiceDialog.js';
 import { handleLexiText, isLexiTextCommand } from './handlers/chat/lexiText.js';
@@ -115,6 +116,12 @@ export default {
 
       if (isLexiChatCommand(eventPayload)) {
         await handleLexiChat({ userId, groupId, token: env.VK_TOKEN });
+        await answerVkMessageEvent({ token: env.VK_TOKEN, eventId: eventContext.eventId, userId, peerId: eventContext.peerId });
+        return okResponse();
+      }
+
+      if (isLexiDictionaryCommand(eventPayload)) {
+        await handleLexiDictionary({ userId, groupId, token: env.VK_TOKEN });
         await answerVkMessageEvent({ token: env.VK_TOKEN, eventId: eventContext.eventId, userId, peerId: eventContext.peerId });
         return okResponse();
       }
@@ -252,6 +259,11 @@ export default {
 
       if (isLexiChatCommand(parsedPayload)) {
         await handleLexiChat({ userId, groupId, token: env.VK_TOKEN });
+        return okResponse();
+      }
+
+      if (isLexiDictionaryCommand(parsedPayload)) {
+        await handleLexiDictionary({ userId, groupId, token: env.VK_TOKEN });
         return okResponse();
       }
 
