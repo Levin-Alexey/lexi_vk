@@ -4,6 +4,7 @@ compatibility_date = "2026-02-10"
 
 [vars]
 R2_PUBLIC_BASE_URL = "https://pub-3c07f333ebcc4cb69dc369beb8d7086a.r2.dev"
+DEBUG_LOG_LEVEL = "detailed"
 
 [[kv_namespaces]]
 binding = "KV"
@@ -26,9 +27,9 @@ queue = "voice-tasks"
 binding = "TEXT_TASKS"
 queue = "text-tasks"
 
-# [[queues.producers]]
-# binding = "DICTIONARY_TASKS"
-# queue = "dictionary-tasks"
+[[queues.producers]]
+binding = "DICTIONARY_TASKS"
+queue = "dictionary-tasks"
 
 [[queues.consumers]]
 queue = "voice-tasks"
@@ -40,9 +41,9 @@ queue = "text-tasks"
 max_batch_size = 10
 max_batch_timeout = 5
 
-# [[queues.consumers]]
-# queue = "dictionary-tasks"
-# max_batch_size = 5
-# max_batch_timeout = 2
-# max_concurrency = 5
+[[queues.consumers]]
+queue = "dictionary-tasks"
+max_batch_size = 5
+max_batch_timeout = 2
+max_concurrency = 5
 

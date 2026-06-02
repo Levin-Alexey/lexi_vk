@@ -45,6 +45,27 @@ export async function sendVkMessage({ userId, groupId, token, message, keyboard,
   return { ok: true, messageId: result.response };
 }
 
+export async function sendVkCarousel({ userId, groupId, token, elements }) {
+  const template = {
+    type: 'carousel',
+    elements: Array.isArray(elements) ? elements : [],
+  };
+
+  const result = await callVkMethod('messages.send', token, {
+    user_id: userId,
+    group_id: groupId,
+    random_id: Date.now(),
+    message: '📚 Карточки слов',
+    template,
+  });
+
+  if (!result.ok) {
+    return result;
+  }
+
+  return { ok: true, messageId: result.response };
+}
+
 export async function editVkMessage({ token, peerId, conversationMessageId, message, keyboard, attachment }) {
   const result = await callVkMethod('messages.edit', token, {
     peer_id: peerId,

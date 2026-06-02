@@ -1,10 +1,16 @@
 import { handleOnboardingAction, handleStartOnboarding, isOnboardingCommand, onboardingPayload } from './handlers/startOnboarding.js';
 import { handleExistingUser } from './handlers/existingUser.js';
+import { handleLessonA1, isLessonA1Command } from './handlers/lessons/levelA1.js';
+import { handleLessonA2, isLessonA2Command } from './handlers/lessons/levelA2.js';
+import { handleLessonB1, isLessonB1Command } from './handlers/lessons/levelB1.js';
+import { handleLessonB2, isLessonB2Command } from './handlers/lessons/levelB2.js';
+import { handleLessonC1, isLessonC1Command } from './handlers/lessons/levelC1.js';
+import { handleLexiLessons, isLexiLessonsCommand } from './handlers/lessons/lexiLessons.js';
 import { handleAddDictionaryWord, handleAddDictionaryWordAction, isAddDictionaryWordActionCommand, isAddDictionaryWordCommand } from './handlers/dictionary/addWord.js';
-import { handleDictionaryGame, isDictionaryGameCommand } from './handlers/dictionary/rememberWordGame.js';
+import { handleDictionaryGame, handleDictionaryTrainingAction, isDictionaryGameCommand, isDictionaryTrainingCommand } from './handlers/dictionary/rememberWordGame.js';
 import { handleLexiChat, handleLexiMainMenu, isLexiChatCommand, isLexiMainMenuCommand } from './handlers/lexiChat.js';
 import { handleLexiDictionary, isLexiDictionaryCommand } from './handlers/dictionary/myDictionary.js';
-import { handleMyDictionaryWords, isMyDictionaryWordsCommand } from './handlers/dictionary/myWords.js';
+import { handleDictionaryCarouselAction, handleMyDictionaryWords, isDictionaryCarouselCommand, isMyDictionaryWordsCommand } from './handlers/dictionary/myWords.js';
 import { handleLexiVoice, isLexiVoiceCommand } from './handlers/chat/lexiVoice.js';
 import { handleLexiVoiceDialog, isLexiVoiceDialogCommand } from './handlers/chat/lexiVoiceDialog.js';
 import { handleLexiText, isLexiTextCommand } from './handlers/chat/lexiText.js';
@@ -21,6 +27,7 @@ import { answerVkMessageEvent, sendVkMessage } from './services/vkApi.js';
 
 const CONFIRMATION_CODE = '02c2fafa';
 const WELCOME_VIDEO_ATTACHMENT = 'video-230370533_456239021';
+const MAX_DETAILED_LOG_LENGTH = 4000;
 
 const firstVisitKeyboard = {
   inline: true,
@@ -50,7 +57,8 @@ export default {
     let payload = null;
     try {
       payload = await request.json();
-      console.log('[RECV] JSON payload:', JSON.stringify(payload));
+      const payloadLog = buildIncomingPayloadLog(payload, env);
+      console.log('[RECV] Payload:', payloadLog);
     } catch (error) {
       console.log('[ERROR] Не валидный JSON:', error);
       return new Response('Bad Request', { status: 400 });
@@ -129,6 +137,42 @@ export default {
         return okResponse();
       }
 
+      if (isLexiLessonsCommand(eventPayload)) {
+        await handleLexiLessons({ userId, groupId, token: env.VK_TOKEN });
+        await answerVkMessageEvent({ token: env.VK_TOKEN, eventId: eventContext.eventId, userId, peerId: eventContext.peerId });
+        return okResponse();
+      }
+
+      if (isLessonA1Command(eventPayload)) {
+        await handleLessonA1({ userId, groupId, token: env.VK_TOKEN });
+        await answerVkMessageEvent({ token: env.VK_TOKEN, eventId: eventContext.eventId, userId, peerId: eventContext.peerId });
+        return okResponse();
+      }
+
+      if (isLessonA2Command(eventPayload)) {
+        await handleLessonA2({ userId, groupId, token: env.VK_TOKEN });
+        await answerVkMessageEvent({ token: env.VK_TOKEN, eventId: eventContext.eventId, userId, peerId: eventContext.peerId });
+        return okResponse();
+      }
+
+      if (isLessonB1Command(eventPayload)) {
+        await handleLessonB1({ userId, groupId, token: env.VK_TOKEN });
+        await answerVkMessageEvent({ token: env.VK_TOKEN, eventId: eventContext.eventId, userId, peerId: eventContext.peerId });
+        return okResponse();
+      }
+
+      if (isLessonB2Command(eventPayload)) {
+        await handleLessonB2({ userId, groupId, token: env.VK_TOKEN });
+        await answerVkMessageEvent({ token: env.VK_TOKEN, eventId: eventContext.eventId, userId, peerId: eventContext.peerId });
+        return okResponse();
+      }
+
+      if (isLessonC1Command(eventPayload)) {
+        await handleLessonC1({ userId, groupId, token: env.VK_TOKEN });
+        await answerVkMessageEvent({ token: env.VK_TOKEN, eventId: eventContext.eventId, userId, peerId: eventContext.peerId });
+        return okResponse();
+      }
+
       if (isAddDictionaryWordCommand(eventPayload)) {
         await handleAddDictionaryWord({ userId, groupId, token: env.VK_TOKEN });
         await answerVkMessageEvent({ token: env.VK_TOKEN, eventId: eventContext.eventId, userId, peerId: eventContext.peerId });
@@ -147,9 +191,48 @@ export default {
         return okResponse();
       }
 
+      if (isDictionaryCarouselCommand(eventPayload)) {
+        const actionResult = await handleDictionaryCarouselAction({
+          env,
+          userId,
+          groupId,
+          token: env.VK_TOKEN,
+          payload: eventPayload,
+        });
+
+        await answerVkMessageEvent({
+          token: env.VK_TOKEN,
+          eventId: eventContext.eventId,
+          userId,
+          peerId: eventContext.peerId,
+          text: actionResult?.snackbarText,
+        });
+        return okResponse();
+      }
+
       if (isDictionaryGameCommand(eventPayload)) {
         await handleDictionaryGame({ userId, groupId, token: env.VK_TOKEN });
         await answerVkMessageEvent({ token: env.VK_TOKEN, eventId: eventContext.eventId, userId, peerId: eventContext.peerId });
+        return okResponse();
+      }
+
+      if (isDictionaryTrainingCommand(eventPayload)) {
+        const actionResult = await handleDictionaryTrainingAction({
+          env,
+          userId,
+          groupId,
+          token: env.VK_TOKEN,
+          payload: eventPayload,
+          eventContext,
+        });
+
+        await answerVkMessageEvent({
+          token: env.VK_TOKEN,
+          eventId: eventContext.eventId,
+          userId,
+          peerId: eventContext.peerId,
+          text: actionResult?.snackbarText,
+        });
         return okResponse();
       }
 
@@ -294,6 +377,36 @@ export default {
         return okResponse();
       }
 
+      if (isLexiLessonsCommand(parsedPayload)) {
+        await handleLexiLessons({ userId, groupId, token: env.VK_TOKEN });
+        return okResponse();
+      }
+
+      if (isLessonA1Command(parsedPayload)) {
+        await handleLessonA1({ userId, groupId, token: env.VK_TOKEN });
+        return okResponse();
+      }
+
+      if (isLessonA2Command(parsedPayload)) {
+        await handleLessonA2({ userId, groupId, token: env.VK_TOKEN });
+        return okResponse();
+      }
+
+      if (isLessonB1Command(parsedPayload)) {
+        await handleLessonB1({ userId, groupId, token: env.VK_TOKEN });
+        return okResponse();
+      }
+
+      if (isLessonB2Command(parsedPayload)) {
+        await handleLessonB2({ userId, groupId, token: env.VK_TOKEN });
+        return okResponse();
+      }
+
+      if (isLessonC1Command(parsedPayload)) {
+        await handleLessonC1({ userId, groupId, token: env.VK_TOKEN });
+        return okResponse();
+      }
+
       if (isLexiVoiceCommand(parsedPayload)) {
         await handleLexiVoice({ userId, groupId, token: env.VK_TOKEN });
         return okResponse();
@@ -403,6 +516,93 @@ function parseMessagePayload(rawPayload) {
   } catch {
     return null;
   }
+}
+
+function summarizeIncomingPayload(payload) {
+  const type = payload?.type || 'unknown';
+  const groupId = payload?.group_id || null;
+  const obj = payload?.object || {};
+
+  if (type === 'message_event') {
+    const eventPayload = obj?.payload && typeof obj.payload === 'object' ? obj.payload : parseMessagePayload(obj?.payload);
+    return {
+      type,
+      groupId,
+      userId: Number(obj?.user_id || 0) || null,
+      peerId: Number(obj?.peer_id || 0) || null,
+      conversationMessageId: Number(obj?.conversation_message_id || 0) || null,
+      command: eventPayload?.c || null,
+      version: eventPayload?.v || null,
+    };
+  }
+
+  if (type === 'message_new') {
+    const msg = obj?.message || {};
+    const parsed = parseMessagePayload(msg?.payload);
+    return {
+      type,
+      groupId,
+      userId: Number(msg?.from_id || 0) || null,
+      peerId: Number(msg?.peer_id || 0) || null,
+      conversationMessageId: Number(msg?.conversation_message_id || 0) || null,
+      textLength: String(msg?.text || '').length,
+      attachments: Array.isArray(msg?.attachments) ? msg.attachments.length : 0,
+      command: parsed?.c || null,
+      version: parsed?.v || null,
+    };
+  }
+
+  return {
+    type,
+    groupId,
+  };
+}
+
+function buildIncomingPayloadLog(payload, env) {
+  const summary = summarizeIncomingPayload(payload);
+  const level = String(env?.DEBUG_LOG_LEVEL || 'summary').trim().toLowerCase();
+  if (level !== 'detailed') {
+    return summary;
+  }
+
+  const sanitized = sanitizePayloadForLog(payload);
+  let detailedJson = '';
+
+  try {
+    detailedJson = JSON.stringify(sanitized);
+  } catch {
+    detailedJson = '{"error":"failed_to_serialize_payload"}';
+  }
+
+  if (detailedJson.length > MAX_DETAILED_LOG_LENGTH) {
+    detailedJson = `${detailedJson.slice(0, MAX_DETAILED_LOG_LENGTH)}...[truncated]`;
+  }
+
+  return {
+    level: 'detailed',
+    summary,
+    detailed: detailedJson,
+  };
+}
+
+function sanitizePayloadForLog(payload) {
+  if (!payload || typeof payload !== 'object') {
+    return payload;
+  }
+
+  const clone = JSON.parse(JSON.stringify(payload));
+  if (typeof clone.secret === 'string' && clone.secret.length > 0) {
+    clone.secret = '[redacted]';
+  }
+
+  const message = clone?.object?.message;
+  if (message && Array.isArray(message.attachments) && message.attachments.length > 0) {
+    clone.object.message.attachments = message.attachments.map((attachment) => ({
+      type: attachment?.type || 'unknown',
+    }));
+  }
+
+  return clone;
 }
 
 function isStartOnboarding(text, payload) {

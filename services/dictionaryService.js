@@ -94,13 +94,26 @@ export async function handleAddWordCommand(env, userId, groupId, vkToken) {
     return { ok: true, queued: true };
   }
 
-  // Fallback for environments where dictionary queue is not enabled yet.
-  return processDictionaryQueueMessage(queuePayload, env);
+  await sendVkMessage({
+    userId,
+    groupId,
+    token: vkToken,
+    message: 'Очередь словаря не подключена. Обратитесь к администратору.',
+  });
+  return { ok: false, reason: 'dictionary_queue_not_configured' };
 }
 
 export async function processDictionaryQueueMessage(body, env) {
   const { type, wordId, userId, groupId } = body || {};
-  if (type !== 'generate_word_data' || !wordId) {
+  if (!wordId) {
+    return { ok: false, reason: 'unsupported_dictionary_task' };
+  }
+
+  if (type === 'deliver_word_audio') {
+    return processDictionaryAudioTask({ wordId, userId, groupId }, env);
+  }
+
+  if (type !== 'generate_word_data') {
     return { ok: false, reason: 'unsupported_dictionary_task' };
   }
 
@@ -159,6 +172,75 @@ export async function processDictionaryQueueMessage(body, env) {
       });
     }
     return { ok: false, reason: 'dictionary_generation_failed' };
+  }
+}
+
+async function processDictionaryAudioTask({ wordId, userId, groupId }, env) {
+  try {
+    await ensureDictionarySchema(env.DB);
+
+    const wordRow = await env.DB
+      .prepare('SELECT id, word_en, example_en, audio_url FROM base_words WHERE id = ? LIMIT 1')
+      .bind(wordId)
+      .first();
+
+    if (!wordRow?.word_en) {
+      return { ok: false, reason: 'word_not_found' };
+    }
+
+    let audioUrl = String(wordRow.audio_url || '').trim();
+    if (!audioUrl) {
+      const audio = await synthesizeAudio(env.OPENAI_API_KEY, String(wordRow.example_en || '').trim());
+      if (!audio || !env?.MY_R2_BUCKET) {
+        if (userId && groupId && env?.VK_TOKEN) {
+          await sendVkMessage({
+            userId,
+            groupId,
+            token: env.VK_TOKEN,
+            message: `Не получилось подготовить аудио для слова ${wordRow.word_en}.`,
+          });
+        }
+        return { ok: false, reason: 'tts_generation_failed' };
+      }
+
+      const key = `words/example_${wordRow.id}.mp3`;
+      await env.MY_R2_BUCKET.put(key, audio.buffer, {
+        httpMetadata: { contentType: 'audio/mpeg' },
+      });
+
+      const baseUrl = String(env.R2_PUBLIC_BASE_URL || DEFAULT_R2_PUBLIC_BASE_URL).replace(/\/+$/, '');
+      audioUrl = `${baseUrl}/${key}`;
+      await env.DB.prepare('UPDATE base_words SET audio_url = ? WHERE id = ?').bind(audioUrl, wordRow.id).run();
+    }
+
+    const audioResponse = await fetch(audioUrl);
+    if (!audioResponse.ok) {
+      return { ok: false, reason: 'audio_fetch_failed' };
+    }
+
+    const audioBuffer = await audioResponse.arrayBuffer();
+    await sendVkVoiceMessageFromMp3({
+      userId,
+      groupId,
+      token: env.VK_TOKEN,
+      mp3Bytes: new Uint8Array(audioBuffer),
+      mimeType: 'audio/mpeg',
+      fileName: `word_${wordId}.mp3`,
+      message: `🔊 Произношение слова ${wordRow.word_en}`,
+    });
+
+    return { ok: true };
+  } catch (error) {
+    console.error('[DICT_ERROR] processDictionaryAudioTask failed', error);
+    if (userId && groupId && env?.VK_TOKEN) {
+      await sendVkMessage({
+        userId,
+        groupId,
+        token: env.VK_TOKEN,
+        message: 'Ошибка при отправке аудио слова.',
+      });
+    }
+    return { ok: false, reason: 'dictionary_audio_task_failed' };
   }
 }
 
