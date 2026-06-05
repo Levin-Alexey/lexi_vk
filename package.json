@@ -3,10 +3,18 @@
   "version": "1.0.0",
   "description": "Cloudflare Workers project",
   "main": "index.js",
+  "type": "module",
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "publish": "wrangler publish"
+    "publish": "wrangler publish",
+
+    "seed:sql": "node HF/generate-seed-sql.js",
+    "seed:local": "npm run seed:sql && wrangler d1 execute DB --local --file=./generated/seed-lessons.sql --yes",
+    "seed:remote": "npm run seed:sql && wrangler d1 execute DB --remote --file=./generated/seed-lessons.sql --yes",
+
+    "db:test:local": "wrangler d1 execute DB --local --command=\"SELECT name FROM sqlite_master WHERE type='table';\"",
+    "db:test:remote": "wrangler d1 execute DB --remote --command=\"SELECT name FROM sqlite_master WHERE type='table';\""
   },
   "keywords": [],
   "author": "",
