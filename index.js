@@ -1,11 +1,11 @@
 import { handleOnboardingAction, handleStartOnboarding, isOnboardingCommand, onboardingPayload } from './handlers/startOnboarding.js';
 import { handleExistingUser } from './handlers/existingUser.js';
-import { handleLessonA1, isLessonA1Command } from './handlers/lessons/levelA1.js';
-import { handleLessonA2, isLessonA2Command } from './handlers/lessons/levelA2.js';
-import { handleLessonB1, isLessonB1Command } from './handlers/lessons/levelB1.js';
-import { handleLessonB2, isLessonB2Command } from './handlers/lessons/levelB2.js';
-import { handleLessonC1, isLessonC1Command } from './handlers/lessons/levelC1.js';
-import { handleLexiLessons, isLexiLessonsCommand } from './handlers/lessons/lexiLessons.js';
+import { handleLessonA1, isLessonA1Command } from './lessons/levelA1.js';
+import { handleLessonA2, isLessonA2Command } from './lessons/levelA2.js';
+import { handleLessonB1, isLessonB1Command } from './lessons/levelB1.js';
+import { handleLessonB2, isLessonB2Command } from './lessons/levelB2.js';
+import { handleLessonC1, isLessonC1Command } from './lessons/levelC1.js';
+import { handleLexiLessons, isLexiLessonsCommand } from './lessons/lexiLessons.js';
 import { handleAddDictionaryWord, handleAddDictionaryWordAction, isAddDictionaryWordActionCommand, isAddDictionaryWordCommand } from './handlers/dictionary/addWord.js';
 import { handleDictionaryGame, handleDictionaryTrainingAction, isDictionaryGameCommand, isDictionaryTrainingCommand } from './handlers/dictionary/rememberWordGame.js';
 import { handleLexiChat, handleLexiMainMenu, isLexiChatCommand, isLexiMainMenuCommand } from './handlers/lexiChat.js';
