@@ -1,9 +1,10 @@
 const VK_API_VERSION = '5.199';
 
 async function callVkMethod(method, token, params) {
-  const url = new URL(`https://api.vk.com/method/${method}`);
-  url.searchParams.append('access_token', token);
-  url.searchParams.append('v', VK_API_VERSION);
+  const url = `https://api.vk.com/method/${method}`;
+  const bodyParams = new URLSearchParams();
+  bodyParams.append('access_token', token);
+  bodyParams.append('v', VK_API_VERSION);
 
   for (const [key, value] of Object.entries(params || {})) {
     if (value === undefined || value === null) {
@@ -11,14 +12,34 @@ async function callVkMethod(method, token, params) {
     }
 
     if (typeof value === 'object') {
-      url.searchParams.append(key, JSON.stringify(value));
+      bodyParams.append(key, JSON.stringify(value));
     } else {
-      url.searchParams.append(key, String(value));
+      bodyParams.append(key, String(value));
     }
   }
 
-  const response = await fetch(url.toString());
-  const data = await response.json();
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/x-www-form-urlencoded;charset=UTF-8',
+    },
+    body: bodyParams,
+  });
+
+  const raw = await response.text();
+  let data;
+  try {
+    data = JSON.parse(raw);
+  } catch {
+    console.error('[VK_ERROR] Non-JSON response', method, response.status, raw.slice(0, 200));
+    return {
+      ok: false,
+      error: {
+        error_code: response.status || 0,
+        error_msg: `VK non-JSON response: ${raw.slice(0, 120)}`,
+      },
+    };
+  }
 
   if (data.error) {
     console.error('[VK_ERROR]', method, data.error.error_msg || JSON.stringify(data.error));

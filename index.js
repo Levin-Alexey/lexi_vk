@@ -1,6 +1,6 @@
 import { handleOnboardingAction, handleStartOnboarding, isOnboardingCommand, onboardingPayload } from './handlers/startOnboarding.js';
 import { handleExistingUser } from './handlers/existingUser.js';
-import { handleLessonA1, isLessonA1Command } from './lessons/levelA1.js';
+import { handleLessonA1, handleLessonA1Open, handleLessonA1Page, handleLessonA1Step, handleLessonA1Ans, handleLessonA1Complete, isLessonA1Command, isLessonA1OpenCommand, isLessonA1PageCommand, isLessonA1StepCommand, isLessonA1AnsCommand, isLessonA1CompleteCommand } from './lessons/levelA1.js';
 import { handleLessonA2, isLessonA2Command } from './lessons/levelA2.js';
 import { handleLessonB1, isLessonB1Command } from './lessons/levelB1.js';
 import { handleLessonB2, isLessonB2Command } from './lessons/levelB2.js';
@@ -145,6 +145,36 @@ export default {
 
       if (isLessonA1Command(eventPayload)) {
         await handleLessonA1({ userId, groupId, token: env.VK_TOKEN, env });
+        await answerVkMessageEvent({ token: env.VK_TOKEN, eventId: eventContext.eventId, userId, peerId: eventContext.peerId });
+        return okResponse();
+      }
+
+      if (isLessonA1OpenCommand(eventPayload)) {
+        await handleLessonA1Open({ userId, groupId, token: env.VK_TOKEN, env, payload: eventPayload });
+        await answerVkMessageEvent({ token: env.VK_TOKEN, eventId: eventContext.eventId, userId, peerId: eventContext.peerId });
+        return okResponse();
+      }
+
+      if (isLessonA1PageCommand(eventPayload)) {
+        await handleLessonA1Page({ userId, groupId, token: env.VK_TOKEN, env, payload: eventPayload });
+        await answerVkMessageEvent({ token: env.VK_TOKEN, eventId: eventContext.eventId, userId, peerId: eventContext.peerId });
+        return okResponse();
+      }
+
+      if (isLessonA1StepCommand(eventPayload)) {
+        await handleLessonA1Step({ userId, groupId, token: env.VK_TOKEN, env, payload: eventPayload });
+        await answerVkMessageEvent({ token: env.VK_TOKEN, eventId: eventContext.eventId, userId, peerId: eventContext.peerId });
+        return okResponse();
+      }
+
+      if (isLessonA1AnsCommand(eventPayload)) {
+        await handleLessonA1Ans({ userId, groupId, token: env.VK_TOKEN, env, payload: eventPayload });
+        await answerVkMessageEvent({ token: env.VK_TOKEN, eventId: eventContext.eventId, userId, peerId: eventContext.peerId });
+        return okResponse();
+      }
+
+      if (isLessonA1CompleteCommand(eventPayload)) {
+        await handleLessonA1Complete({ userId, groupId, token: env.VK_TOKEN, env, payload: eventPayload });
         await answerVkMessageEvent({ token: env.VK_TOKEN, eventId: eventContext.eventId, userId, peerId: eventContext.peerId });
         return okResponse();
       }
@@ -384,6 +414,31 @@ export default {
 
       if (isLessonA1Command(parsedPayload)) {
         await handleLessonA1({ userId, groupId, token: env.VK_TOKEN, env });
+        return okResponse();
+      }
+
+      if (isLessonA1OpenCommand(parsedPayload)) {
+        await handleLessonA1Open({ userId, groupId, token: env.VK_TOKEN, env, payload: parsedPayload });
+        return okResponse();
+      }
+
+      if (isLessonA1PageCommand(parsedPayload)) {
+        await handleLessonA1Page({ userId, groupId, token: env.VK_TOKEN, env, payload: parsedPayload });
+        return okResponse();
+      }
+
+      if (isLessonA1StepCommand(parsedPayload)) {
+        await handleLessonA1Step({ userId, groupId, token: env.VK_TOKEN, env, payload: parsedPayload });
+        return okResponse();
+      }
+
+      if (isLessonA1AnsCommand(parsedPayload)) {
+        await handleLessonA1Ans({ userId, groupId, token: env.VK_TOKEN, env, payload: parsedPayload });
+        return okResponse();
+      }
+
+      if (isLessonA1CompleteCommand(parsedPayload)) {
+        await handleLessonA1Complete({ userId, groupId, token: env.VK_TOKEN, env, payload: parsedPayload });
         return okResponse();
       }
 
