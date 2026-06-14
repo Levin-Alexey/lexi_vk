@@ -144,7 +144,7 @@ export default {
       }
 
       if (isLessonA1Command(eventPayload)) {
-        await handleLessonA1({ userId, groupId, token: env.VK_TOKEN });
+        await handleLessonA1({ userId, groupId, token: env.VK_TOKEN, env });
         await answerVkMessageEvent({ token: env.VK_TOKEN, eventId: eventContext.eventId, userId, peerId: eventContext.peerId });
         return okResponse();
       }
@@ -383,7 +383,7 @@ export default {
       }
 
       if (isLessonA1Command(parsedPayload)) {
-        await handleLessonA1({ userId, groupId, token: env.VK_TOKEN });
+        await handleLessonA1({ userId, groupId, token: env.VK_TOKEN, env });
         return okResponse();
       }
 
