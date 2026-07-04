@@ -12,10 +12,10 @@ const keyboard = {
   inline: true,
   buttons: [
     [{ action: { type: 'callback', label: 'A1', payload: lessonPayload(LESSON_A1_COMMAND) }, color: 'primary' }],
-    [{ action: { type: 'callback', label: 'A2', payload: lessonPayload(LESSON_A2_COMMAND) }, color: 'secondary' }],
-    [{ action: { type: 'callback', label: 'B1', payload: lessonPayload(LESSON_B1_COMMAND) }, color: 'secondary' }],
-    [{ action: { type: 'callback', label: 'B2', payload: lessonPayload(LESSON_B2_COMMAND) }, color: 'secondary' }],
-    [{ action: { type: 'callback', label: 'C1', payload: lessonPayload(LESSON_C1_COMMAND) }, color: 'secondary' }],
+    [{ action: { type: 'callback', label: 'A2', payload: lessonPayload(LESSON_A2_COMMAND) }, color: 'primary' }],
+    [{ action: { type: 'callback', label: 'B1', payload: lessonPayload(LESSON_B1_COMMAND) }, color: 'primary' }],
+    [{ action: { type: 'callback', label: 'B2', payload: lessonPayload(LESSON_B2_COMMAND) }, color: 'primary' }],
+    [{ action: { type: 'callback', label: 'C1', payload: lessonPayload(LESSON_C1_COMMAND) }, color: 'primary' }],
   ],
 };
 
