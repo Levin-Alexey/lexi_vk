@@ -44,6 +44,30 @@ lines.push("");
 lines.push("PRAGMA foreign_keys = ON;");
 
 lines.push(`
+CREATE TABLE IF NOT EXISTS levels (
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL,
+  description TEXT,
+  code TEXT
+);
+`);
+
+const levelSeed = [
+  { id: 1, name: "A1", description: "Начальный уровень" },
+  { id: 2, name: "A2", description: "Базовый уровень" },
+  { id: 3, name: "B1", description: "Средний уровень" },
+  { id: 4, name: "B2", description: "Выше среднего" },
+  { id: 5, name: "C1", description: "Продвинутый уровень" },
+];
+
+for (const level of levelSeed) {
+  lines.push(`
+INSERT OR IGNORE INTO levels (id, name, description)
+VALUES (${level.id}, '${sqlText(level.name)}', '${sqlText(level.description)}');
+`);
+}
+
+lines.push(`
 CREATE UNIQUE INDEX IF NOT EXISTS idx_lesson_steps_lesson_order
 ON lesson_steps (lesson_id, order_num);
 `);
