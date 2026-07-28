@@ -118,11 +118,20 @@ export async function processTextQueueMessage(body, env) {
 
   const summary = summaryRow?.context_summary || '';
   const recentHistory = (historyRows.results || []).reverse();
-  const modelMessages = buildDialogMessages(summary, recentHistory, userText, limitCheck.level_id);
+  const styleCode = await getUserLexiStyle(env.DB, userId);
+  const simplifyRequested = isSimplificationRequest(userText);
+  const modelMessages = buildDialogMessages({
+    summary,
+    historyRows: recentHistory,
+    userText,
+    level: limitCheck.level_id,
+    styleCode,
+    simplifyRequested,
+  });
 
   // 3. Запрос к LLM (со строгим JSON)
   const assistantReply = await requestOpenRouter({ apiKey: env.OPENROUTER_API_KEY, messages: modelMessages });
-  
+
   // 4. Пакетная запись (Batch) в БД
   const batchResults = await env.DB.batch([
     env.DB.prepare('INSERT INTO chat_history (vk_id, role, content) VALUES (?, ?, ?)').bind(userId, 'user', userText),
@@ -132,7 +141,7 @@ export async function processTextQueueMessage(body, env) {
 
   // 5. Отправка ответа
   const fullMessage = assistantReply.corrections ? `${assistantReply.en}\n\n💡 ${assistantReply.corrections}` : assistantReply.en;
-  
+
   await sendVkMessage({
     userId, groupId, token: env.VK_TOKEN, message: fullMessage,
     keyboard: { inline: true, buttons: [[{ action: { type: 'callback', label: 'Показать перевод 🇷🇺', payload: translationPayload(assistantHistoryId) }, color: 'secondary' }]] }
@@ -163,7 +172,7 @@ async function checkAndIncrementLimit(db, userId, counterType) {
 
   if (currentValue >= maxLimit) {
     const isFree = effectiveTier === 'free';
-    const message = isFree 
+    const message = isFree
       ? `На сегодня лимит бесплатных сообщений (${maxLimit}) закончился.\nОформи VK Donut, чтобы общаться без лимита.`
       : `Твой дневной лимит (${maxLimit} сообщений) исчерпан.\nОн обновится завтра.`;
     return { allowed: false, level_id: user?.level_id || 1, message, keyboard: buildChooseTariffKeyboard() };
@@ -188,7 +197,7 @@ async function getDonutAccessState(db, userId) {
 
     const paidActive = row?.last_paid_at && row.days_since_paid < DONUT_PERIOD_DAYS;
     const recoveryActive = !row?.last_paid_at && row?.last_stop_at && row.days_since_stop < DONUT_PERIOD_DAYS;
-    
+
     return { isActive: paidActive || recoveryActive };
   } catch (err) {
     return { isActive: false };
@@ -199,10 +208,21 @@ async function getDonutAccessState(db, userId) {
 // LLM И ПРОМПТЫ
 // ============================================================================
 
-function buildDialogMessages(summary, historyRows, userText, level = 1) {
-  const levelGuidance = level === 1 ? 'Level 1: Very simple A1-A2 vocabulary, short sentences.' 
-    : level === 2 ? 'Level 2: A2-B1 vocabulary, mix of tenses.' 
-    : 'Level 3: B1-B2 vocabulary, idiomatic expressions.';
+function buildDialogMessages({ summary, historyRows, userText, level = 1, styleCode = 'friendly_friend', simplifyRequested = false }) {
+  const normalizedLevel = normalizeLevel(level);
+  const effectiveLevel = simplifyRequested ? Math.max(1, normalizedLevel - 1) : normalizedLevel;
+  const levelGuidance = level === 1 ? 'Level 1: Very simple A1-A2 vocabulary, short sentences.'
+    : level === 2 ? 'Level 2: A2-B1 vocabulary, mix of tenses.'
+      : 'Level 3: B1-B2 vocabulary, idiomatic expressions.';
+  const adjustedLevelGuidance = effectiveLevel === 1
+    ? 'Level 1: Very simple A1-A2 vocabulary, short sentences.'
+    : effectiveLevel === 2
+      ? 'Level 2: A2-B1 vocabulary, mix of tenses.'
+      : 'Level 3: B1-B2 vocabulary, idiomatic expressions.';
+  const styleGuidance = buildTextStyleGuidance(styleCode);
+  const simplificationGuidance = simplifyRequested
+    ? 'The learner says they do not understand. Simplify heavily now: shorter phrases, simpler words, and one concrete example.'
+    : 'If the learner asks for clarification, simplify wording first before adding details.';
 
   const systemPrompt = `You are Lexi, a professional English teacher and personal language coach for Russian-speaking learners.
 
@@ -225,8 +245,16 @@ TEXT-DIALOG RULE (CRITICAL):
 ENGAGEMENT RULE (MANDATORY):
 - Every English reply must end with one clear question to keep the dialogue going.
 
+STYLE ADAPTATION:
+- ${styleGuidance}
+
 LEVEL ADAPTATION:
-- ${levelGuidance}
+- ${adjustedLevelGuidance}
+- Level rules are always stronger than style rules.
+- Never increase complexity because of style.
+
+SIMPLIFICATION SAFETY:
+- ${simplificationGuidance}
 
 MEMORY CONTEXT:
 LONG-TERM MEMORY: ${summary || 'None'}
@@ -243,7 +271,7 @@ Return only valid JSON. No markdown. No extra keys.`;
   const messages = [{ role: 'system', content: systemPrompt }];
   for (const row of historyRows) messages.push({ role: row.role, content: row.content });
   messages.push({ role: 'user', content: userText });
-  
+
   return messages;
 }
 
@@ -336,4 +364,43 @@ async function answerEvent(eventContext, token, text) {
   if (eventContext?.eventId) {
     await answerVkMessageEvent({ token, eventId: eventContext.eventId, userId: eventContext.eventUserId, peerId: eventContext.peerId, text });
   }
+}
+
+function normalizeLevel(level) {
+  const numericLevel = Number(level) || 1;
+  if (numericLevel <= 1) return 1;
+  if (numericLevel === 2) return 2;
+  return 3;
+}
+
+function isSimplificationRequest(text) {
+  const normalized = String(text || '').toLowerCase();
+  return /(не понимаю|непонятно|сложно|слишком сложно|проще|объясни проще|simpler|too hard|i don't understand|dont understand)/i.test(normalized);
+}
+
+async function getUserLexiStyle(db, userId) {
+  if (!db) return 'friendly_friend';
+  const row = await db.prepare('SELECT lexi_style FROM users_vk WHERE vk_id = ? LIMIT 1').bind(userId).first();
+  return normalizeStyleCode(row?.lexi_style);
+}
+
+function normalizeStyleCode(rawStyle) {
+  const style = String(rawStyle || '').trim().toLowerCase();
+  if (style === 'futurist') return 'future_traveler';
+  if (['oxford_professor', 'future_traveler', 'friendly_friend'].includes(style)) {
+    return style;
+  }
+  return 'friendly_friend';
+}
+
+function buildTextStyleGuidance(styleCode) {
+  if (styleCode === 'oxford_professor') {
+    return 'Act like a calm Oxford professor: structured, clear, respectful explanations with step-by-step logic.';
+  }
+
+  if (styleCode === 'future_traveler') {
+    return 'Act like a friendly traveler from the future: inspiring tone, practical examples, optimistic energy.';
+  }
+
+  return 'Act like a simple supportive friend: short clear phrasing, warm encouragement, no academic tone.';
 }

@@ -131,7 +131,7 @@ export async function processVoiceQueueMessage(body, env) {
     // 1. Скачиваем аудио и распознаем через OpenAI Whisper
     const audioBuffer = await downloadAudio(linkMp3);
     if (!audioBuffer) throw new Error('Download failed');
-    
+
     const transcript = await transcribeAudioOpenAI(env.OPENAI_API_KEY, audioBuffer);
     if (!transcript) {
       await sendVkMessage({ userId, groupId, token: env.VK_TOKEN, message: 'Не удалось распознать голос. Попробуйте еще раз четче.' });
@@ -139,18 +139,20 @@ export async function processVoiceQueueMessage(body, env) {
     }
 
     // 2. Достаем память и уровень одним Batch-запросом для скорости
-    const [levelRow, summaryRow, historyRows] = await Promise.all([
-      env.DB.prepare('SELECT level_id FROM users_vk WHERE vk_id = ? LIMIT 1').bind(userId).first(),
+    const [userRow, summaryRow, historyRows] = await Promise.all([
+      env.DB.prepare('SELECT level_id, lexi_style FROM users_vk WHERE vk_id = ? LIMIT 1').bind(userId).first(),
       env.DB.prepare('SELECT context_summary FROM user_memory WHERE vk_id = ? LIMIT 1').bind(userId).first(),
       env.DB.prepare('SELECT role, content FROM chat_history WHERE vk_id = ? ORDER BY id DESC LIMIT 4').bind(userId).all()
     ]);
 
-    const level = Number(levelRow?.level_id) || 1;
+    const level = Number(userRow?.level_id) || 1;
+    const styleCode = normalizeStyleCode(userRow?.lexi_style);
+    const simplifyRequested = isSimplificationRequest(transcript);
     const summary = summaryRow?.context_summary || '';
     const memoryLines = (historyRows.results || []).reverse().map(r => `${r.role}: ${r.content}`);
 
     // 3. УЛЬТИМАТИВНЫЙ ПРОМПТ К LLM (1 запрос вместо 4-х)
-    const replyData = await generateUltimateReply(env.OPENROUTER_API_KEY, transcript, summary, memoryLines, level);
+    const replyData = await generateUltimateReply(env.OPENROUTER_API_KEY, transcript, summary, memoryLines, level, styleCode, simplifyRequested);
 
     // 4. Озвучиваем ответ через OpenAI TTS
     const voiceAudio = await synthesizeEnglishAudio(env.OPENAI_API_KEY, replyData.en);
@@ -310,12 +312,18 @@ async function synthesizeEnglishAudio(apiKey, text) {
   return { bytes: new Uint8Array(await response.arrayBuffer()), mimeType: 'audio/mpeg', fileName: 'reply.mp3' };
 }
 
-async function generateUltimateReply(apiKey, transcript, summary, memoryLines, level) {
-  const levelRule = level <= 1
+async function generateUltimateReply(apiKey, transcript, summary, memoryLines, level, styleCode = 'friendly_friend', simplifyRequested = false) {
+  const normalizedLevel = normalizeLevel(level);
+  const effectiveLevel = simplifyRequested ? Math.max(1, normalizedLevel - 1) : normalizedLevel;
+  const levelRule = effectiveLevel <= 1
     ? 'Use VERY simple A1-A2 vocabulary. Max 1-2 short sentences. No idioms.'
-    : level === 2
-    ? 'Use everyday A2-B1 vocabulary. 2-3 short sentences.'
-    : 'Use natural B1-B2 vocabulary. Keep it conversational.';
+    : effectiveLevel === 2
+      ? 'Use everyday A2-B1 vocabulary. 2-3 short sentences.'
+      : 'Use natural B1-B2 vocabulary. Keep it conversational.';
+  const styleRule = buildVoiceStyleGuidance(styleCode);
+  const simplificationRule = simplifyRequested
+    ? 'The learner says they do not understand. Simplify strongly now and speak in very short phrases.'
+    : 'If the learner asks for clarification, simplify first and only then add detail.';
 
   const systemPrompt = `You are Lexi, a professional English teacher and personal language coach for Russian-speaking learners.
 
@@ -346,8 +354,16 @@ ENGAGEMENT RULE (MANDATORY):
 - Every English reply MUST end with one clear, motivating question that invites the learner to continue.
 - Exactly one final question mark at the end is preferred.
 
+STYLE ADAPTATION:
+- ${styleRule}
+
 LEVEL ADAPTATION:
 - ${levelRule}
+- Level rules are always stronger than style rules.
+- Never increase complexity because of style.
+
+SIMPLIFICATION SAFETY:
+- ${simplificationRule}
 
 MEMORY CONTEXT:
 LONG-TERM MEMORY: ${summary || 'None'}
@@ -415,6 +431,39 @@ function normalizeVoiceReply(parsed) {
     ru: ru || 'Отлично, давай продолжим практику. О чем ты хочешь поговорить дальше?',
     corrections,
   };
+}
+
+function normalizeLevel(level) {
+  const numericLevel = Number(level) || 1;
+  if (numericLevel <= 1) return 1;
+  if (numericLevel === 2) return 2;
+  return 3;
+}
+
+function isSimplificationRequest(text) {
+  const normalized = String(text || '').toLowerCase();
+  return /(не понимаю|непонятно|сложно|слишком сложно|проще|объясни проще|simpler|too hard|i don't understand|dont understand)/i.test(normalized);
+}
+
+function normalizeStyleCode(rawStyle) {
+  const style = String(rawStyle || '').trim().toLowerCase();
+  if (style === 'futurist') return 'future_traveler';
+  if (['oxford_professor', 'future_traveler', 'friendly_friend'].includes(style)) {
+    return style;
+  }
+  return 'friendly_friend';
+}
+
+function buildVoiceStyleGuidance(styleCode) {
+  if (styleCode === 'oxford_professor') {
+    return 'Speak like a supportive Oxford professor: structured oral guidance, clear pacing, precise explanations.';
+  }
+
+  if (styleCode === 'future_traveler') {
+    return 'Speak like a friendly traveler from the future: energetic but clear, inspiring voice practice prompts.';
+  }
+
+  return 'Speak like a simple supportive friend: short natural voice prompts, easy phrasing, calm encouragement.';
 }
 
 async function compressHistoryIfNeeded(db, apiKey, userId) {

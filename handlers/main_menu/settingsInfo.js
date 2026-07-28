@@ -4,11 +4,18 @@ import { SETTINGS_INFO_BUTTON_TEXT } from './constants.js';
 const PAYLOAD_VERSION = 1;
 const SETTINGS_MENU_COMMAND = 'settings_info_menu';
 const SETTINGS_SUBSCRIPTION_STATUS_COMMAND = 'settings_subscription_status';
+const SETTINGS_STYLE_MENU_COMMAND = 'settings_style_menu';
+const SETTINGS_STYLE_SET_COMMAND = 'settings_style_set';
 const SETTINGS_RETURN_MAIN_MENU_COMMAND = 'settings_return_main_menu';
 const SHOW_TARIFFS_COMMAND = 'show_tariffs';
 
 const SETTINGS_SUBSCRIPTION_STATUS_BUTTON_TEXT = '💳 Мой тариф и статус подписки';
+const SETTINGS_STYLE_BUTTON_TEXT = '🎭 Стиль Lexi';
 const SETTINGS_BACK_MAIN_MENU_BUTTON_TEXT = '🏠 Вернуться в главное меню';
+
+const STYLE_OXFORD = 'oxford_professor';
+const STYLE_FUTURE = 'future_traveler';
+const STYLE_FRIEND = 'friendly_friend';
 
 export function isSettingsInfoButtonText(text) {
   return String(text || '').trim() === SETTINGS_INFO_BUTTON_TEXT;
@@ -20,6 +27,14 @@ export function isSettingsMenuCommand(payload) {
 
 export function isSettingsSubscriptionStatusCommand(payload) {
   return payload?.v === PAYLOAD_VERSION && payload?.c === SETTINGS_SUBSCRIPTION_STATUS_COMMAND;
+}
+
+export function isSettingsStyleMenuCommand(payload) {
+  return payload?.v === PAYLOAD_VERSION && payload?.c === SETTINGS_STYLE_MENU_COMMAND;
+}
+
+export function isSettingsStyleSetCommand(payload) {
+  return payload?.v === PAYLOAD_VERSION && payload?.c === SETTINGS_STYLE_SET_COMMAND;
 }
 
 export function isSettingsReturnMainMenuCommand(payload) {
@@ -65,6 +80,55 @@ export async function handleSettingsSubscriptionStatus({ env, userId, groupId, t
   });
 }
 
+export async function handleSettingsStyleMenu({ env, userId, groupId, token }) {
+  const styleCode = await getCurrentStyleCode(env?.DB, userId);
+
+  return sendVkMessage({
+    userId,
+    groupId,
+    token,
+    message: [
+      '🎭 Стиль Lexi',
+      '',
+      `Сейчас выбран стиль: ${describeStyle(styleCode).name}.`,
+      'Важно: сложность языка всегда контролируется уровнем ученика.',
+      'Выберите стиль общения.',
+    ].join('\n'),
+    keyboard: buildSettingsStyleKeyboard(styleCode),
+  });
+}
+
+export async function handleSettingsStyleSet({ env, userId, groupId, token, payload }) {
+  const nextStyle = normalizeStyle(payload?.s);
+  if (!nextStyle) {
+    return sendVkMessage({
+      userId,
+      groupId,
+      token,
+      message: 'Не удалось определить стиль. Попробуйте выбрать еще раз.',
+      keyboard: buildSettingsMenuKeyboard(),
+    });
+  }
+
+  if (env?.DB) {
+    await env.DB.prepare('INSERT OR IGNORE INTO users_vk (vk_id) VALUES (?)').bind(userId).run();
+    await env.DB.prepare('UPDATE users_vk SET lexi_style = ? WHERE vk_id = ?').bind(nextStyle, userId).run();
+  }
+
+  return sendVkMessage({
+    userId,
+    groupId,
+    token,
+    message: [
+      '✅ Стиль обновлен',
+      '',
+      `Новый стиль: ${describeStyle(nextStyle).name}.`,
+      'Сложность речи по-прежнему подстраивается под уровень ученика.',
+    ].join('\n'),
+    keyboard: buildSettingsStyleKeyboard(nextStyle),
+  });
+}
+
 function buildSettingsMenuKeyboard() {
   return {
     inline: true,
@@ -77,6 +141,74 @@ function buildSettingsMenuKeyboard() {
             payload: JSON.stringify({ v: PAYLOAD_VERSION, c: SETTINGS_SUBSCRIPTION_STATUS_COMMAND }),
           },
           color: 'primary',
+        },
+      ],
+      [
+        {
+          action: {
+            type: 'callback',
+            label: SETTINGS_STYLE_BUTTON_TEXT,
+            payload: JSON.stringify({ v: PAYLOAD_VERSION, c: SETTINGS_STYLE_MENU_COMMAND }),
+          },
+          color: 'primary',
+        },
+      ],
+      [
+        {
+          action: {
+            type: 'callback',
+            label: SETTINGS_BACK_MAIN_MENU_BUTTON_TEXT,
+            payload: JSON.stringify({ v: PAYLOAD_VERSION, c: SETTINGS_RETURN_MAIN_MENU_COMMAND }),
+          },
+          color: 'secondary',
+        },
+      ],
+    ],
+  };
+}
+
+function buildSettingsStyleKeyboard(currentStyleCode) {
+  return {
+    inline: true,
+    buttons: [
+      [
+        {
+          action: {
+            type: 'callback',
+            label: formatStyleOptionLabel(STYLE_OXFORD, currentStyleCode),
+            payload: JSON.stringify({ v: PAYLOAD_VERSION, c: SETTINGS_STYLE_SET_COMMAND, s: STYLE_OXFORD }),
+          },
+          color: 'primary',
+        },
+      ],
+      [
+        {
+          action: {
+            type: 'callback',
+            label: formatStyleOptionLabel(STYLE_FUTURE, currentStyleCode),
+            payload: JSON.stringify({ v: PAYLOAD_VERSION, c: SETTINGS_STYLE_SET_COMMAND, s: STYLE_FUTURE }),
+          },
+          color: 'primary',
+        },
+      ],
+      [
+        {
+          action: {
+            type: 'callback',
+            label: formatStyleOptionLabel(STYLE_FRIEND, currentStyleCode),
+            payload: JSON.stringify({ v: PAYLOAD_VERSION, c: SETTINGS_STYLE_SET_COMMAND, s: STYLE_FRIEND }),
+          },
+          color: 'primary',
+        },
+      ],
+      [
+        {
+          action: {
+            type: 'callback',
+            label: '⬅️ Назад в настройки',
+            payload: JSON.stringify({ v: PAYLOAD_VERSION, c: SETTINGS_MENU_COMMAND }),
+          },
+          color: 'secondary',
         },
       ],
       [
@@ -214,6 +346,46 @@ function formatDate(value) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '';
   return date.toISOString().slice(0, 10);
+}
+
+async function getCurrentStyleCode(db, userId) {
+  if (!db) return STYLE_FRIEND;
+  const row = await db.prepare('SELECT lexi_style FROM users_vk WHERE vk_id = ? LIMIT 1').bind(userId).first();
+  return normalizeStyle(row?.lexi_style) || STYLE_FRIEND;
+}
+
+function normalizeStyle(rawStyle) {
+  const style = String(rawStyle || '').trim().toLowerCase();
+
+  if (style === 'futurist') {
+    return STYLE_FUTURE;
+  }
+
+  if ([STYLE_OXFORD, STYLE_FUTURE, STYLE_FRIEND].includes(style)) {
+    return style;
+  }
+
+  return STYLE_FRIEND;
+}
+
+function describeStyle(styleCode) {
+  if (styleCode === STYLE_OXFORD) {
+    return { name: 'Профессор из Оксфорда' };
+  }
+
+  if (styleCode === STYLE_FUTURE) {
+    return { name: 'Путешественница из будущего' };
+  }
+
+  return { name: 'Простой друг' };
+}
+
+function formatStyleOptionLabel(optionStyleCode, currentStyleCode) {
+  const styleName = describeStyle(optionStyleCode).name;
+  if (optionStyleCode === currentStyleCode) {
+    return `✅ ${styleName}`;
+  }
+  return styleName;
 }
 
 async function getDonutAccessState(db, userId) {

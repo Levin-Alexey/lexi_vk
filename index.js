@@ -17,7 +17,7 @@ import { handleLexiText, isLexiTextCommand } from './handlers/chat/lexiText.js';
 import { handleLexiDialog, isLexiDialogCommand } from './handlers/chat/lexiDialog.js';
 import { handleProfileActivity, handleProfileLcoin, handleProfileMenu, handleProfileProgress, handleProfileSummary, isProfileActivityCommand, isProfileButtonText, isProfileLcoinCommand, isProfileMenuCommand, isProfileProgressCommand, isProfileReturnMainMenuCommand, isProfileSummaryCommand } from './handlers/main_menu/profile.js';
 import { handleReturnMainMenu, isReturnMainMenuButtonText } from './handlers/main_menu/returnMainMenu.js';
-import { handleSettingsInfoMenu, handleSettingsSubscriptionStatus, isSettingsInfoButtonText, isSettingsMenuCommand, isSettingsReturnMainMenuCommand, isSettingsSubscriptionStatusCommand } from './handlers/main_menu/settingsInfo.js';
+import { handleSettingsInfoMenu, handleSettingsStyleMenu, handleSettingsStyleSet, handleSettingsSubscriptionStatus, isSettingsInfoButtonText, isSettingsMenuCommand, isSettingsReturnMainMenuCommand, isSettingsStyleMenuCommand, isSettingsStyleSetCommand, isSettingsSubscriptionStatusCommand } from './handlers/main_menu/settingsInfo.js';
 import { handleShowTariffs, isShowTariffsCommand } from './handlers/serviceMessages.js';
 import { handleDonutEvent, isDonutEvent } from './handlers/donutEvents.js';
 import { handleQueueBatch } from './handlers/queueHandler.js';
@@ -500,6 +500,18 @@ export default {
         return okResponse();
       }
 
+      if (isSettingsStyleMenuCommand(eventPayload)) {
+        await handleSettingsStyleMenu({ env, userId, groupId, token: env.VK_TOKEN });
+        await answerVkMessageEvent({ token: env.VK_TOKEN, eventId: eventContext.eventId, userId, peerId: eventContext.peerId });
+        return okResponse();
+      }
+
+      if (isSettingsStyleSetCommand(eventPayload)) {
+        await handleSettingsStyleSet({ env, userId, groupId, token: env.VK_TOKEN, payload: eventPayload });
+        await answerVkMessageEvent({ token: env.VK_TOKEN, eventId: eventContext.eventId, userId, peerId: eventContext.peerId });
+        return okResponse();
+      }
+
       if (isSettingsReturnMainMenuCommand(eventPayload)) {
         await deactivateTextDialog(env, userId);
         await deactivateVoiceDialog(env, userId);
@@ -811,6 +823,16 @@ export default {
 
       if (isSettingsSubscriptionStatusCommand(parsedPayload)) {
         await handleSettingsSubscriptionStatus({ env, userId, groupId, token: env.VK_TOKEN });
+        return okResponse();
+      }
+
+      if (isSettingsStyleMenuCommand(parsedPayload)) {
+        await handleSettingsStyleMenu({ env, userId, groupId, token: env.VK_TOKEN });
+        return okResponse();
+      }
+
+      if (isSettingsStyleSetCommand(parsedPayload)) {
+        await handleSettingsStyleSet({ env, userId, groupId, token: env.VK_TOKEN, payload: parsedPayload });
         return okResponse();
       }
 
