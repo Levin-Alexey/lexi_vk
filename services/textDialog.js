@@ -158,10 +158,11 @@ export async function processTextQueueMessage(body, env) {
 
 async function checkAndIncrementLimit(db, userId, counterType) {
   const user = await db.prepare('SELECT subscription_tier, level_id FROM users_vk WHERE vk_id = ? LIMIT 1').bind(userId).first();
+  const currentTier = normalizeTier(user?.subscription_tier);
   const donutState = await getDonutAccessState(db, userId);
-  const effectiveTier = (donutState.isActive && user?.subscription_tier !== 'free') ? user.subscription_tier : 'free';
+  const effectiveTier = (donutState.isActive && currentTier !== 'free') ? currentTier : 'free';
 
-  if (effectiveTier !== (user?.subscription_tier || 'free')) {
+  if (effectiveTier !== currentTier) {
     await db.prepare('UPDATE users_vk SET subscription_tier = ? WHERE vk_id = ?').bind(effectiveTier, userId).run();
   }
 
@@ -364,6 +365,20 @@ async function answerEvent(eventContext, token, text) {
   if (eventContext?.eventId) {
     await answerVkMessageEvent({ token, eventId: eventContext.eventId, userId: eventContext.eventUserId, peerId: eventContext.peerId, text });
   }
+}
+
+function normalizeTier(tier) {
+  const value = String(tier || 'free').toLowerCase();
+
+  if (value === 'advanced') return 'tier3';
+  if (value === 'intermediate') return 'tier2';
+  if (value === 'beginner') return 'tier1';
+
+  if (['free', 'tier1', 'tier2', 'tier3'].includes(value)) {
+    return value;
+  }
+
+  return 'free';
 }
 
 function normalizeLevel(level) {

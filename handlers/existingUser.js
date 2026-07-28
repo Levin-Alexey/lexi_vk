@@ -43,7 +43,7 @@ const returningUserKeyboard = {
       {
         action: {
           type: 'callback',
-          label: 'StoryQuest с Lexi',
+          label: 'Живые истории с Lexi',
           payload: storyQuestPayload(),
         },
         color: 'secondary',

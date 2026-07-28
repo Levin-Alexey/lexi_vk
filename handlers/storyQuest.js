@@ -401,6 +401,11 @@ async function ensureQuestAccess(db, userId) {
 
 function normalizeTier(tier) {
     const value = String(tier || 'free').toLowerCase();
+
+    if (value === 'advanced') return 'tier3';
+    if (value === 'intermediate') return 'tier2';
+    if (value === 'beginner') return 'tier1';
+
     if (['free', 'tier1', 'tier2', 'tier3'].includes(value)) {
         return value;
     }
