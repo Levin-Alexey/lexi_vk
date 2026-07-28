@@ -2,6 +2,7 @@ import { sendVkMessage } from '../services/vkApi.js';
 import { lexiChatPayload } from './lexiChat.js';
 import { lexiDictionaryPayload } from './dictionary/myDictionary.js';
 import { lexiLessonsPayload } from '../lessons/lexiLessons.js';
+import { storyQuestPayload } from './storyQuest.js';
 
 const RETURNING_USER_PHOTO_ATTACHMENT = 'photo175946972_457239739_27eedd46884c68f160';
 
@@ -36,6 +37,16 @@ const returningUserKeyboard = {
           payload: lexiLessonsPayload(),
         },
         color: 'primary',
+      },
+    ],
+    [
+      {
+        action: {
+          type: 'callback',
+          label: 'StoryQuest с Lexi',
+          payload: storyQuestPayload(),
+        },
+        color: 'secondary',
       },
     ],
   ],

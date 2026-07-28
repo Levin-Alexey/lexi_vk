@@ -15,6 +15,7 @@ import { handleLexiVoice, isLexiVoiceCommand } from './handlers/chat/lexiVoice.j
 import { handleLexiVoiceDialog, isLexiVoiceDialogCommand } from './handlers/chat/lexiVoiceDialog.js';
 import { handleLexiText, isLexiTextCommand } from './handlers/chat/lexiText.js';
 import { handleLexiDialog, isLexiDialogCommand } from './handlers/chat/lexiDialog.js';
+import { handleStoryQuestAction, handleStoryQuestMenu, isStoryQuestActionCommand, isStoryQuestCommand } from './handlers/storyQuest.js';
 import { handleProfileActivity, handleProfileLcoin, handleProfileMenu, handleProfileProgress, handleProfileSummary, isProfileActivityCommand, isProfileButtonText, isProfileLcoinCommand, isProfileMenuCommand, isProfileProgressCommand, isProfileReturnMainMenuCommand, isProfileSummaryCommand } from './handlers/main_menu/profile.js';
 import { handleReturnMainMenu, isReturnMainMenuButtonText } from './handlers/main_menu/returnMainMenu.js';
 import { handleSettingsInfoMenu, handleSettingsStyleMenu, handleSettingsStyleSet, handleSettingsSubscriptionStatus, isSettingsInfoButtonText, isSettingsMenuCommand, isSettingsReturnMainMenuCommand, isSettingsStyleMenuCommand, isSettingsStyleSetCommand, isSettingsSubscriptionStatusCommand } from './handlers/main_menu/settingsInfo.js';
@@ -520,6 +521,18 @@ export default {
         return okResponse();
       }
 
+      if (isStoryQuestCommand(eventPayload)) {
+        await handleStoryQuestMenu({ env, userId, groupId, token: env.VK_TOKEN });
+        await answerVkMessageEvent({ token: env.VK_TOKEN, eventId: eventContext.eventId, userId, peerId: eventContext.peerId });
+        return okResponse();
+      }
+
+      if (isStoryQuestActionCommand(eventPayload)) {
+        await handleStoryQuestAction({ env, userId, groupId, token: env.VK_TOKEN, payload: eventPayload });
+        await answerVkMessageEvent({ token: env.VK_TOKEN, eventId: eventContext.eventId, userId, peerId: eventContext.peerId });
+        return okResponse();
+      }
+
       if (isOnboardingCommand(eventPayload)) {
         await handleOnboardingAction({
           userId,
@@ -840,6 +853,16 @@ export default {
         await deactivateTextDialog(env, userId);
         await deactivateVoiceDialog(env, userId);
         await handleReturnMainMenu({ userId, groupId, token: env.VK_TOKEN });
+        return okResponse();
+      }
+
+      if (isStoryQuestCommand(parsedPayload)) {
+        await handleStoryQuestMenu({ env, userId, groupId, token: env.VK_TOKEN });
+        return okResponse();
+      }
+
+      if (isStoryQuestActionCommand(parsedPayload)) {
+        await handleStoryQuestAction({ env, userId, groupId, token: env.VK_TOKEN, payload: parsedPayload });
         return okResponse();
       }
 
