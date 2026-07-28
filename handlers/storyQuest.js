@@ -333,16 +333,19 @@ export async function handleStoryQuestAction({ env, userId, groupId, token, payl
 }
 
 function buildStoryGenreKeyboard() {
-    const genreRows = STORY_GENRES.map((genre) => [
-        {
-            action: {
-                type: 'callback',
-                label: genre.title,
-                payload: storyQuestStartPayload(genre.code),
-            },
-            color: 'primary',
+    const genreButtons = STORY_GENRES.map((genre) => ({
+        action: {
+            type: 'callback',
+            label: genre.title,
+            payload: storyQuestStartPayload(genre.code),
         },
-    ]);
+        color: 'primary',
+    }));
+
+    const genreRows = [];
+    for (let i = 0; i < genreButtons.length; i += 2) {
+        genreRows.push(genreButtons.slice(i, i + 2));
+    }
 
     return {
         inline: true,
