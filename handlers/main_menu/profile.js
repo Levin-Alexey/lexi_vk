@@ -9,6 +9,7 @@ const PROFILE_SUMMARY_COMMAND = 'profile_summary';
 const PROFILE_PROGRESS_COMMAND = 'profile_progress';
 const PROFILE_LCOIN_COMMAND = 'profile_lcoin';
 const PROFILE_ACTIVITY_COMMAND = 'profile_activity';
+const PROFILE_RETURN_MAIN_MENU_COMMAND = 'profile_return_main_menu';
 
 export function profileMenuPayload() {
   return JSON.stringify({ v: PAYLOAD_VERSION, c: PROFILE_MENU_COMMAND });
@@ -28,6 +29,10 @@ function profileLcoinPayload() {
 
 function profileActivityPayload() {
   return JSON.stringify({ v: PAYLOAD_VERSION, c: PROFILE_ACTIVITY_COMMAND });
+}
+
+function profileReturnMainMenuPayload() {
+  return JSON.stringify({ v: PAYLOAD_VERSION, c: PROFILE_RETURN_MAIN_MENU_COMMAND });
 }
 
 export function isProfileButtonText(text) {
@@ -52,6 +57,10 @@ export function isProfileLcoinCommand(payload) {
 
 export function isProfileActivityCommand(payload) {
   return payload?.v === PAYLOAD_VERSION && payload?.c === PROFILE_ACTIVITY_COMMAND;
+}
+
+export function isProfileReturnMainMenuCommand(payload) {
+  return payload?.v === PAYLOAD_VERSION && payload?.c === PROFILE_RETURN_MAIN_MENU_COMMAND;
 }
 
 export async function handleProfileMenu({ userId, groupId, token }) {
@@ -80,7 +89,7 @@ export async function handleProfileSummary({ env, userId, groupId, token }) {
       '📚 Выученные слова',
       '',
       `У тебя в словаре ${totalWords} слов.`,
-      'Здесь мы показываем слова, которые уже сохранены и доступны для повторения.',
+      'Список слов здесь не показываю, только общее количество.',
     ].join('\n'),
     keyboard: buildBackToProfileKeyboard(),
   });
@@ -146,7 +155,7 @@ function buildProfileMenuKeyboard() {
       [{ action: { type: 'callback', label: PROFILE_PROGRESS_BUTTON_TEXT, payload: profileProgressPayload() }, color: 'primary' }],
       [{ action: { type: 'callback', label: PROFILE_LCOIN_BUTTON_TEXT, payload: profileLcoinPayload() }, color: 'primary' }],
       [{ action: { type: 'callback', label: PROFILE_ACTIVITY_BUTTON_TEXT, payload: profileActivityPayload() }, color: 'secondary' }],
-      [{ action: { type: 'text', label: RETURN_MAIN_MENU_BUTTON_TEXT }, color: 'secondary' }],
+      [{ action: { type: 'callback', label: RETURN_MAIN_MENU_BUTTON_TEXT, payload: profileReturnMainMenuPayload() }, color: 'secondary' }],
     ],
   };
 }
@@ -156,7 +165,7 @@ function buildBackToProfileKeyboard() {
     inline: true,
     buttons: [
       [{ action: { type: 'callback', label: '⬅️ Назад в кабинет', payload: profileMenuPayload() }, color: 'secondary' }],
-      [{ action: { type: 'text', label: RETURN_MAIN_MENU_BUTTON_TEXT }, color: 'secondary' }],
+      [{ action: { type: 'callback', label: RETURN_MAIN_MENU_BUTTON_TEXT, payload: profileReturnMainMenuPayload() }, color: 'secondary' }],
     ],
   };
 }
