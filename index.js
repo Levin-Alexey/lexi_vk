@@ -15,7 +15,7 @@ import { handleLexiVoice, isLexiVoiceCommand } from './handlers/chat/lexiVoice.j
 import { handleLexiVoiceDialog, isLexiVoiceDialogCommand } from './handlers/chat/lexiVoiceDialog.js';
 import { handleLexiText, isLexiTextCommand } from './handlers/chat/lexiText.js';
 import { handleLexiDialog, isLexiDialogCommand } from './handlers/chat/lexiDialog.js';
-import { handleProfileMenu, isProfileButtonText } from './handlers/main_menu/profile.js';
+import { handleProfileActivity, handleProfileLcoin, handleProfileMenu, handleProfileProgress, handleProfileSummary, isProfileActivityCommand, isProfileButtonText, isProfileLcoinCommand, isProfileMenuCommand, isProfileProgressCommand, isProfileSummaryCommand } from './handlers/main_menu/profile.js';
 import { handleReturnMainMenu, isReturnMainMenuButtonText } from './handlers/main_menu/returnMainMenu.js';
 import { handleSettingsInfoMenu, isSettingsInfoButtonText } from './handlers/main_menu/settingsInfo.js';
 import { handleShowTariffs, isShowTariffsCommand } from './handlers/serviceMessages.js';
@@ -701,6 +701,31 @@ export default {
         await deactivateTextDialog(env, userId);
         await deactivateVoiceDialog(env, userId);
         await handleLexiMainMenu({ userId, groupId, token: env.VK_TOKEN });
+        return okResponse();
+      }
+
+      if (isProfileMenuCommand(parsedPayload)) {
+        await handleProfileMenu({ userId, groupId, token: env.VK_TOKEN });
+        return okResponse();
+      }
+
+      if (isProfileSummaryCommand(parsedPayload)) {
+        await handleProfileSummary({ env, userId, groupId, token: env.VK_TOKEN });
+        return okResponse();
+      }
+
+      if (isProfileProgressCommand(parsedPayload)) {
+        await handleProfileProgress({ env, userId, groupId, token: env.VK_TOKEN });
+        return okResponse();
+      }
+
+      if (isProfileLcoinCommand(parsedPayload)) {
+        await handleProfileLcoin({ env, userId, groupId, token: env.VK_TOKEN });
+        return okResponse();
+      }
+
+      if (isProfileActivityCommand(parsedPayload)) {
+        await handleProfileActivity({ env, userId, groupId, token: env.VK_TOKEN });
         return okResponse();
       }
 
