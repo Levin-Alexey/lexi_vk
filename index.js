@@ -450,6 +450,44 @@ export default {
         return okResponse();
       }
 
+      if (isProfileMenuCommand(eventPayload)) {
+        await handleProfileMenu({ userId, groupId, token: env.VK_TOKEN });
+        await answerVkMessageEvent({ token: env.VK_TOKEN, eventId: eventContext.eventId, userId, peerId: eventContext.peerId });
+        return okResponse();
+      }
+
+      if (isProfileSummaryCommand(eventPayload)) {
+        await handleProfileSummary({ env, userId, groupId, token: env.VK_TOKEN });
+        await answerVkMessageEvent({ token: env.VK_TOKEN, eventId: eventContext.eventId, userId, peerId: eventContext.peerId });
+        return okResponse();
+      }
+
+      if (isProfileProgressCommand(eventPayload)) {
+        await handleProfileProgress({ env, userId, groupId, token: env.VK_TOKEN });
+        await answerVkMessageEvent({ token: env.VK_TOKEN, eventId: eventContext.eventId, userId, peerId: eventContext.peerId });
+        return okResponse();
+      }
+
+      if (isProfileLcoinCommand(eventPayload)) {
+        await handleProfileLcoin({ env, userId, groupId, token: env.VK_TOKEN });
+        await answerVkMessageEvent({ token: env.VK_TOKEN, eventId: eventContext.eventId, userId, peerId: eventContext.peerId });
+        return okResponse();
+      }
+
+      if (isProfileActivityCommand(eventPayload)) {
+        await handleProfileActivity({ env, userId, groupId, token: env.VK_TOKEN });
+        await answerVkMessageEvent({ token: env.VK_TOKEN, eventId: eventContext.eventId, userId, peerId: eventContext.peerId });
+        return okResponse();
+      }
+
+      if (isProfileReturnMainMenuCommand(eventPayload)) {
+        await deactivateTextDialog(env, userId);
+        await deactivateVoiceDialog(env, userId);
+        await handleReturnMainMenu({ userId, groupId, token: env.VK_TOKEN });
+        await answerVkMessageEvent({ token: env.VK_TOKEN, eventId: eventContext.eventId, userId, peerId: eventContext.peerId });
+        return okResponse();
+      }
+
       if (isOnboardingCommand(eventPayload)) {
         await handleOnboardingAction({
           userId,
@@ -706,31 +744,26 @@ export default {
 
       if (isProfileMenuCommand(parsedPayload)) {
         await handleProfileMenu({ userId, groupId, token: env.VK_TOKEN });
-        await answerVkMessageEvent({ token: env.VK_TOKEN, eventId: eventContext.eventId, userId, peerId: eventContext.peerId });
         return okResponse();
       }
 
       if (isProfileSummaryCommand(parsedPayload)) {
         await handleProfileSummary({ env, userId, groupId, token: env.VK_TOKEN });
-        await answerVkMessageEvent({ token: env.VK_TOKEN, eventId: eventContext.eventId, userId, peerId: eventContext.peerId });
         return okResponse();
       }
 
       if (isProfileProgressCommand(parsedPayload)) {
         await handleProfileProgress({ env, userId, groupId, token: env.VK_TOKEN });
-        await answerVkMessageEvent({ token: env.VK_TOKEN, eventId: eventContext.eventId, userId, peerId: eventContext.peerId });
         return okResponse();
       }
 
       if (isProfileLcoinCommand(parsedPayload)) {
         await handleProfileLcoin({ env, userId, groupId, token: env.VK_TOKEN });
-        await answerVkMessageEvent({ token: env.VK_TOKEN, eventId: eventContext.eventId, userId, peerId: eventContext.peerId });
         return okResponse();
       }
 
       if (isProfileActivityCommand(parsedPayload)) {
         await handleProfileActivity({ env, userId, groupId, token: env.VK_TOKEN });
-        await answerVkMessageEvent({ token: env.VK_TOKEN, eventId: eventContext.eventId, userId, peerId: eventContext.peerId });
         return okResponse();
       }
 
@@ -738,7 +771,6 @@ export default {
         await deactivateTextDialog(env, userId);
         await deactivateVoiceDialog(env, userId);
         await handleReturnMainMenu({ userId, groupId, token: env.VK_TOKEN });
-        await answerVkMessageEvent({ token: env.VK_TOKEN, eventId: eventContext.eventId, userId, peerId: eventContext.peerId });
         return okResponse();
       }
 
