@@ -17,7 +17,7 @@ import { handleLexiText, isLexiTextCommand } from './handlers/chat/lexiText.js';
 import { handleLexiDialog, isLexiDialogCommand } from './handlers/chat/lexiDialog.js';
 import { handleProfileActivity, handleProfileLcoin, handleProfileMenu, handleProfileProgress, handleProfileSummary, isProfileActivityCommand, isProfileButtonText, isProfileLcoinCommand, isProfileMenuCommand, isProfileProgressCommand, isProfileReturnMainMenuCommand, isProfileSummaryCommand } from './handlers/main_menu/profile.js';
 import { handleReturnMainMenu, isReturnMainMenuButtonText } from './handlers/main_menu/returnMainMenu.js';
-import { handleSettingsInfoMenu, isSettingsInfoButtonText } from './handlers/main_menu/settingsInfo.js';
+import { handleSettingsInfoMenu, handleSettingsSubscriptionStatus, isSettingsInfoButtonText, isSettingsMenuCommand, isSettingsReturnMainMenuCommand, isSettingsSubscriptionStatusCommand } from './handlers/main_menu/settingsInfo.js';
 import { handleShowTariffs, isShowTariffsCommand } from './handlers/serviceMessages.js';
 import { handleDonutEvent, isDonutEvent } from './handlers/donutEvents.js';
 import { handleQueueBatch } from './handlers/queueHandler.js';
@@ -488,6 +488,26 @@ export default {
         return okResponse();
       }
 
+      if (isSettingsMenuCommand(eventPayload)) {
+        await handleSettingsInfoMenu({ userId, groupId, token: env.VK_TOKEN });
+        await answerVkMessageEvent({ token: env.VK_TOKEN, eventId: eventContext.eventId, userId, peerId: eventContext.peerId });
+        return okResponse();
+      }
+
+      if (isSettingsSubscriptionStatusCommand(eventPayload)) {
+        await handleSettingsSubscriptionStatus({ env, userId, groupId, token: env.VK_TOKEN });
+        await answerVkMessageEvent({ token: env.VK_TOKEN, eventId: eventContext.eventId, userId, peerId: eventContext.peerId });
+        return okResponse();
+      }
+
+      if (isSettingsReturnMainMenuCommand(eventPayload)) {
+        await deactivateTextDialog(env, userId);
+        await deactivateVoiceDialog(env, userId);
+        await handleReturnMainMenu({ userId, groupId, token: env.VK_TOKEN });
+        await answerVkMessageEvent({ token: env.VK_TOKEN, eventId: eventContext.eventId, userId, peerId: eventContext.peerId });
+        return okResponse();
+      }
+
       if (isOnboardingCommand(eventPayload)) {
         await handleOnboardingAction({
           userId,
@@ -781,6 +801,23 @@ export default {
 
       if (isSettingsInfoButtonText(text)) {
         await handleSettingsInfoMenu({ userId, groupId, token: env.VK_TOKEN });
+        return okResponse();
+      }
+
+      if (isSettingsMenuCommand(parsedPayload)) {
+        await handleSettingsInfoMenu({ userId, groupId, token: env.VK_TOKEN });
+        return okResponse();
+      }
+
+      if (isSettingsSubscriptionStatusCommand(parsedPayload)) {
+        await handleSettingsSubscriptionStatus({ env, userId, groupId, token: env.VK_TOKEN });
+        return okResponse();
+      }
+
+      if (isSettingsReturnMainMenuCommand(parsedPayload)) {
+        await deactivateTextDialog(env, userId);
+        await deactivateVoiceDialog(env, userId);
+        await handleReturnMainMenu({ userId, groupId, token: env.VK_TOKEN });
         return okResponse();
       }
 
