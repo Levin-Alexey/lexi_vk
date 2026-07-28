@@ -88,8 +88,8 @@ export async function handleProfileSummary({ env, userId, groupId, token }) {
     message: [
       '📚 Выученные слова',
       '',
-      `У тебя в словаре ${totalWords} слов.`,
-      'Список слов здесь не показываю, только общее количество.',
+      `У Вас в словаре ${totalWords} слов.`,
+      'Все слова можно посмотреть в Вашем словаре.',
     ].join('\n'),
     keyboard: buildBackToProfileKeyboard(),
   });
@@ -106,7 +106,6 @@ export async function handleProfileProgress({ env, userId, groupId, token }) {
       '📈 Мой прогресс',
       '',
       `Пройдено уроков: ${completedLessons}.`,
-      'Позже сюда можно добавить прогресс по уровням и процент завершения.',
     ].join('\n'),
     keyboard: buildBackToProfileKeyboard(),
   });
@@ -122,7 +121,7 @@ export async function handleProfileLcoin({ env, userId, groupId, token }) {
     message: [
       '🪙 LexiCoin',
       '',
-      `Сейчас у тебя ${balance} LexiCoin.`,
+      `Сейчас у Вас ${balance} LexiCoin.`,
       'Монеты начисляются за активность и достижения.',
     ].join('\n'),
     keyboard: buildBackToProfileKeyboard(),
