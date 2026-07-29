@@ -46,7 +46,7 @@ const returningUserKeyboard = {
           label: 'Живые истории с Lexi',
           payload: storyQuestPayload(),
         },
-        color: 'secondary',
+        color: 'primary',
       },
     ],
   ],

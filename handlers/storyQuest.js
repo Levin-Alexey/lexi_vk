@@ -20,13 +20,13 @@ const STORY_SESSION_TTL_SECONDS = 60 * 60 * 24 * 3;
 
 const STORY_GENRES = [
     { code: 'horror', title: 'Хоррор' },
-    { code: 'sci_fi', title: 'Фантастическое приключение' },
+    { code: 'sci_fi', title: 'Фантастическая история' },
     { code: 'fantasy', title: 'Приключение фэнтези' },
     { code: 'space', title: 'Космическое приключение' },
     { code: 'comedy', title: 'Комедийная история' },
     { code: 'detective', title: 'Детективная история' },
-    { code: 'post_apocalypse', title: 'Постапокалиптическое выживание' },
-    { code: 'romance', title: 'Романтическое приключение' },
+    { code: 'post_apocalypse', title: 'Постапокалипсис' },
+    { code: 'romance', title: 'Романтика' },
 ];
 
 export function storyQuestPayload() {
